@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+defaults:
+  run:
+    shell: bash
+
 env:
   NUITKA: >-
     python -m nuitka --onefile --assume-yes-for-downloads
