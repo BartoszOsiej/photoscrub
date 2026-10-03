@@ -1,0 +1,118 @@
+name: build
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'tag to build (e.g. v1.0.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Smoke test the engine
+        run: |
+          python - <<'PY'
+          import subprocess, sys, os
+          # engine musi dzialac na Linuksie, inaczej nie wydajemy nic
+          r = subprocess.run([sys.executable, 'photoscrub.py', '--help'],
+                             capture_output=True, text=True)
+          assert r.returncode == 0, r.stderr
+          print('engine ok')
+          PY
+      - name: Build onefile binary
+        run: |
+          pyinstaller --onefile \
+            --name photoscrub \
+            --hidden-import PIL.Image \
+            --hidden-import PIL.ExifTags \
+            photoscrub.py
+      - name: Test the binary
+        run: |
+          chmod +x dist/photoscrub
+          ./dist/photoscrub --help
+          ./dist/photoscrub /tmp || true
+      - name: Checksum + package
+        run: |
+          cd dist
+          sha256sum photoscrub > photoscrub-linux.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photoscrub-linux
+          path: dist/
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Smoke test the engine
+        shell: pwsh
+        run: |
+          python photoscrub.py --help
+          if ($LASTEXITCODE -ne 0) { throw "engine failed on Windows" }
+          "engine ok on windows"
+      - name: Build exe
+        run: |
+          pyinstaller --onefile --name photoscrub.exe photoscrub.py
+      - name: Test the exe
+        shell: pwsh
+        run: |
+          .\dist\photoscrub.exe --help
+          if ($LASTEXITCODE -ne 0) { throw "built exe does not run" }
+          "exe runs on windows"
+      - name: Checksum
+        run: |
+          cd dist
+          (Get-FileHash photoscrub.exe -Algorithm SHA256).Hash.ToLower() + "  photoscrub.exe" | Out-File -Encoding ascii photoscrub-windows.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photoscrub-windows
+          path: dist/
+
+  release:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/photoscrub-linux/photoscrub
+            artifacts/photoscrub-linux/photoscrub-linux.sha256
+            artifacts/photoscrub-windows/photoscrub.exe
+            artifacts/photoscrub-windows/photoscrub-windows.sha256
+          body: |
+            Metadata leak scanner and remover. Local, offline, no account.
+
+            Windows: `photoscrub.exe`
+            Linux: `chmod +x photoscrub && ./photoscrub PATH`
+
+            Verify:
+            ```
+            sha256sum -c photoscrub-linux.sha256
+            ```
