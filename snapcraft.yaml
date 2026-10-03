@@ -1,0 +1,41 @@
+name: photoscrub
+base: core22
+version: '0.1.0'
+summary: Find what your photos leak, then strip it
+description: |
+  photoscrub shows what your photos reveal - GPS coordinates, device serial
+  number, and the thumbnail embedded in the JPEG that often contains a complete
+  copy of the original image. Then it writes metadata-free copies.
+  Runs locally. No upload, no account, no network.
+
+grade: stable
+confinement: strict
+
+apps:
+  photoscrub:
+    command: bin/photoscrub
+    desktop: usr/share/applications/photoscrub.desktop
+  photoscrub-gui:
+    command: bin/photoscrub-gui
+    desktop: usr/share/applications/photoscrub-gui.desktop
+
+parts:
+  photoscrub:
+    plugin: python
+    source: .
+    python-packages:
+      - pillow>=10.0
+    stage-packages:
+      - python3-tk
+    organize:
+      bin/photoscrub: usr/bin/photoscrub
+      bin/photoscrub-gui: usr/bin/photoscrub-gui
+      bin/gui.py: usr/lib/photoscrub/gui.py
+      bin/photoscrub.py: usr/lib/photoscrub/photoscrub.py
+
+  desktop:
+    plugin: dump
+    source: desktop
+    organize:
+      photoscrub.desktop: usr/share/applications/photoscrub.desktop
+      photoscrub-gui.desktop: usr/share/applications/photoscrub-gui.desktop

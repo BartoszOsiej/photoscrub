@@ -90,6 +90,36 @@ jobs:
           name: photoscrub-windows
           path: dist/
 
+  msix:
+    runs-on: windows-latest
+    needs: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Build exe
+        run: |
+          pyinstaller --onefile --name photoscrub.exe photoscrub.py
+      - name: Pack MSIX (unsigned, layout only)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force msix_payload | Out-Null
+          Copy-Item dist/photoscrub.exe msix_payload/
+          Copy-Item packaging/msix/AppxManifest.xml msix_payload/
+          Copy-Item -Recurse packaging/msix/assets msix_payload/assets
+          New-Item -ItemType Directory -Force msix_out | Out-Null
+          makeappx pack /d msix_payload /p msix_out/photoscrub.msix /o
+          Get-Item msix_out/photoscrub.msix | Select-Object Name,Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photoscrub-msix
+          path: msix_out/
+
   release:
     needs: [linux, windows]
     runs-on: ubuntu-latest
@@ -102,6 +132,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            artifacts/photoscrub-msix/msix_out/photoscrub.msix
             artifacts/photoscrub-linux/photoscrub
             artifacts/photoscrub-linux/photoscrub-linux.sha256
             artifacts/photoscrub-windows/photoscrub.exe

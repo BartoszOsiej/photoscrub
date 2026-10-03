@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+
+  <Identity Name="HartwellLabs.photoscrub"
+            Publisher="CN=Hartwell Labs"
+            Version="0.1.0.0" />
+
+  <Properties>
+    <DisplayName>photoscrub</DisplayName>
+    <PublisherDisplayName>Hartwell Labs</PublisherDisplayName>
+    <Description>Shows what your photos leak - GPS, device serial, and the thumbnail hidden inside the JPEG - then strips it. Runs locally.</Description>
+    <Logo>assets/logo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="App" Executable="photoscrub.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="photoscrub"
+        Description="Find and remove what your photos leak"
+        BackgroundColor="#0e1218"
+        Square150x150Logo="assets/logo150.png"
+        Square44x44Logo="assets/logo44.png">
+        <uap:DefaultTile Wide310x150Logo="assets/logo310.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

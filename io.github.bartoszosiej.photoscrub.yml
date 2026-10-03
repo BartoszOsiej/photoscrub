@@ -1,0 +1,32 @@
+id: io.github.bartoszosiej.photoscrub
+runtime: org.freedesktop.Platform
+runtime-version: '22.08'
+sdk: org.freedesktop.Sdk
+command: photoscrub-gui
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+
+cleanup:
+  - /include
+  - /lib/cmake
+  - /share/doc
+  - /man
+  - /share/man
+
+modules:
+  - name: photoscrub
+    buildsystem: simple
+    build-commands:
+      - pip install --prefix=/app --no-deps .
+      - install -Dm755 bin/photoscrub-gui /app/bin/photoscrub-gui
+      - install -Dm755 bin/photoscrub /app/bin/photoscrub
+      - install -Dm644 bin/photoscrub.py /app/lib/photoscrub/photoscrub.py
+      - install -Dm644 bin/gui.py /app/lib/photoscrub/gui.py
+      - install -Dm644 desktop/photoscrub.desktop /app/share/applications/photoscrub.desktop
+    sources:
+      - type: dir
+        path: .
