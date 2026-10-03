@@ -16,92 +16,226 @@ import model as mdl
 import photoscrub as ps
 import ruleset as rs
 
+# Wszystkie wartosci ponizej pochodza z theme.py, a theme.py z realnych
+# tokenow Radix Themes / Radix Colors / shadcn (dark). Zadne liczby "na oko".
 QSS = """
-QWidget { background:#0b0e14; color:#f2f5fa;
-         font-family:'Inter','Noto Sans','DejaVu Sans'; font-size:13px; }
-QToolTip { background:#141b28; color:#f2f5fa; border:1px solid #243044;
-           padding:6px 8px; border-radius:6px; }
+/* ── baza: Radix typography (base 14px = Text size 2) ── */
+QWidget {{
+    background:{bg};
+    color:{fg};
+    /* Jeden kroj w calej aplikacji. Microsoft: "use the default font for
+       Windows apps, Segoe UI Variable"; na Linuksie Inter. */
+    font-family:'Segoe UI Variable Display','Segoe UI','Inter','Noto Sans',
+                 'DejaVu Sans',sans-serif;
+    font-size:14px;
+    line-height:20px;
+}}
+QWidget:disabled {{ color:{faint}; }}
 
-/* ── nagłówek ──*/
-QLabel#logo { color:#f2f5fa; font-size:17px; font-weight:600; }
-QLabel#tagline { color:#4a5568; font-size:12px; }
-QLabel#headline { color:#f2f5fa; font-size:30px; font-weight:700; }
-QLabel#subline { color:#7b8798; font-size:13px; }
-QLabel#panelTitle { color:#4a5568; font-size:11px; font-weight:700; letter-spacing:1px; }
-QLabel#fileName { color:#f2f5fa; font-size:14px; font-weight:600; }
+/* QLabel musi byc przezroczysty. Regula QWidget background nadawala kazdej
+   etykiecie kolor tla aplikacji, wiec w panelach (jasniejszych) kazda etykieta
+   malowala ciemniejszy prostokat — wygladalo jak czarne pasy pod tekstem. */
+QLabel {{ background:transparent; }}
+QCheckBox, QRadioButton {{ background:transparent; }}
 
-/* ── przyciski ──*/
-QPushButton { background:#141b28; color:#c7d0de; border:1px solid #243044;
-              border-radius:8px; padding:9px 16px; font-size:13px; }
-QPushButton:hover { background:#1c2534; border-color:#3d5bff; color:#f2f5fa; }
-QPushButton:pressed { background:#141b28; }
-QPushButton[cta="true"] { background:#3d5bff; color:#ffffff; border:none;
-                         padding:13px 26px; font-size:14px; font-weight:700; }
-QPushButton[cta="true"]:hover { background:#5a76ff; }
-QPushButton[cta="true"]:disabled { background:#1a2331; color:#4a5568; }
-QPushButton[ghost="true"] { background:transparent; border:none; color:#3d5bff;
-                           padding:6px 8px; font-size:12px; }
+QMenuBar {{ background:transparent; color:{muted}; font-size:12px; }}
+QMenuBar::item {{ padding:4px 8px; background:transparent; }}
+QMenuBar::item:selected {{ background:{panel2}; color:{fg}; }}
+QMenu {{ background:{popover}; color:{fg}; border:1px solid {line_strong}; }}
+QMenu::item {{ padding:6px 12px; border-radius:{r_sm}px; }}
+QMenu::item:selected {{ background:{panel2}; }}
+QMenu::separator {{ height:1px; background:{line}; margin:4px 8px; }}
 
-/* ── statystyki ── */
-QFrame#tile { background:transparent; }
-QLabel#statValue { font-size:26px; font-weight:700; }
-QLabel#statLabel { color:#4a5568; font-size:11px; }
-QFrame#sep { background:#1a2230; max-height:1px; border:none; }
+QToolTip {{
+    background:{panel}; color:{fg};
+    border:1px solid {line};
+    border-radius:{r_md}px; padding:8px 10px;
+}}
 
-QProgressBar { background:#141b28; border:none; border-radius:2px; height:3px; }
-QProgressBar::chunk { background:#3d5bff; border-radius:2px; }
+/* ── naglowek ── */
+QLabel#brand {{ font-size:14px; font-weight:600; letter-spacing:-0.0025em; }}
+QLabel#tagline {{ font-size:12px; color:{faint}; }}
+QLabel#title {{ font-size:28px; font-weight:600; letter-spacing:-0.0075em; }}
+QLabel#subtitle {{ font-size:14px; color:{muted}; }}
+QLabel#panelLabel {{ font-size:12px; font-weight:500; color:{faint};
+                    letter-spacing:0.0025em; }}
+QLabel#fileName {{ font-size:14px; font-weight:600; }}
+QLabel#fileMeta {{ font-size:12px; color:{faint}; }}
 
-/* ── karty ── */
-QFrame#card { background:#141b28; border:1px solid #1c2534; border-radius:10px; }
-QFrame#card:hover { border:1px solid #3d5bff; }
-QLabel#cardName { color:#f2f5fa; font-size:12px; }
-QLabel#cardBadge { font-size:11px; font-weight:700; }
-QLabel#cardRisk { font-size:12px; font-weight:700; }
-QLabel#cardThumb { background:#0f1420; border-radius:6px; }
+/* ── przyciski: shadcn Button (sm/md/lg x soft/ghost/solid) ── */
+QPushButton {{
+    background:{panel2}; color:{fg};
+    border:1px solid {line}; border-radius:{r_md}px;
+    padding:8px 12px; font-size:14px; font-weight:400;
+    min-height:32px;
+}}
+QPushButton:hover {{ background:{panel3}; border-color:{line_strong}; }}
+QPushButton:pressed {{ background:{panel2}; }}
+QPushButton:focus {{ border-color:{ring}; background:{panel3}; }}
+QPushButton:disabled {{ background:{panel}; color:{faint}; border-color:{line}; }}
 
-/* ── panel szczegółów ── */
-QFrame#side { background:#10151f; border:1px solid #1c2534; border-radius:12px; }
-QTextEdit#detail, QTextBrowser#detail { background:#10151f; color:#c7d0de;
-        border:none; font-family:'Inter','DejaVu Sans Mono'; font-size:12px; }
-QTextBrowser#notes { background:transparent; color:#5d6a80; border:none;
-                     font-size:12px; }
+/* ghost = bez wypelnienia, dla akcji drugorzednych (Hick: nie dawaj
+   trzech rownych przyciskow na jeden ekran) */
+QPushButton[variant="ghost"] {{
+    background:transparent; border:1px solid transparent; color:{muted};
+    padding:8px 12px;
+}}
+QPushButton[variant="ghost"]:hover {{ background:{panel2}; color:{fg}; }}
+
+/* solid = jedyna akcja glowna na ekranie */
+QPushButton[variant="solid"] {{
+    background:{accent}; color:{accent_fg}; border:1px solid {accent};
+    border-radius:{r_md}px; padding:10px 16px;
+    font-size:14px; font-weight:600; min-height:40px;
+}}
+QPushButton[variant="solid"]:hover {{ background:{accent_hi}; border-color:{accent_hi}; }}
+QPushButton[variant="solid"]:pressed {{ background:{accent}; }}
+QPushButton[variant="solid"]:disabled {{
+    background:{panel2}; color:{faint}; border-color:{line};
+}}
+
+/* ── pasek postepu (Doherty: informacja w <400ms) ── */
+QProgressBar {{
+    background:{panel2}; border:none; border-radius:{r1}px;
+    height:4px; max-height:4px;
+}}
+QProgressBar::chunk {{ background:{accent}; border-radius:{r1}px; }}
+
+/* ── karty plikow: Card z common region ── */
+QFrame#card {{
+    background:{panel}; border:1px solid {line};
+    border-radius:{r_lg}px;
+}}
+QFrame#card:hover {{ border-color:{line_strong}; background:{panel2}; }}
+QFrame#card[worst="true"] {{ border-color:{danger_line}; }}
+QFrame#card[sel="true"] {{ border-color:{accent}; background:{accent_soft}; }}
+
+QLabel#thumb {{ background:#0b0b0c; border-radius:{r_sm}px; }}
+QLabel#cardName {{ font-size:12px; color:{fg}; }}
+QLabel#cardBadge {{ font-size:12px; font-weight:600; }}
+QLabel#cardRisk {{ font-size:12px; font-weight:600;
+                   font-family:'Inter','DejaVu Sans Mono',monospace; }}
+QLabel#worstTag {{
+    font-size:12px; font-weight:600; color:{danger};
+    background:{danger_soft}; border-radius:{r_full}px; padding:2px 8px;
+}}
+
+/* ── panel szczegolow ── */
+QFrame#side {{
+    background:{panel}; border:1px solid {line};
+    border-radius:{r_xl}px;
+}}
+QTextBrowser#detail {{
+    background:transparent; border:none;
+    font-size:14px; color:{fg};
+    selection-background-color:{accent_soft};
+}}
+QFrame#group {{
+    background:{panel2}; border:1px solid {line};
+    border-radius:{r_lg}px;
+}}
+QLabel#groupTitle {{ font-size:12px; font-weight:500; color:{muted}; }}
+QLabel#groupKind {{ font-size:14px; font-weight:500; }}
+QLabel#groupValue {{ font-size:12px; color:{muted}; }}
+QLabel#empty {{ font-size:14px; color:{faint}; }}
 
 /* ── strefa upuszczania ── */
-QFrame#drop { background:#0b0e14; border:2px dashed #243044; border-radius:14px; }
-QFrame#drop[hot="true"] { background:#111725; border:2px solid #3d5bff; }
-QLabel#dropTitle { color:#c7d0de; font-size:15px; font-weight:600; }
-QLabel#dropSub { color:#4a5568; font-size:12px; }
+QFrame#drop {{
+    background:{bg}; border:1px dashed {line_strong};
+    border-radius:{r_2xl}px;
+}}
+QFrame#drop[hot="true"] {{
+    background:{accent_soft}; border:1px solid {accent};
+}}
+QLabel#dropTitle {{ font-size:20px; font-weight:600; letter-spacing:-0.005em; }}
+QLabel#dropSub {{ font-size:14px; color:{muted}; }}
+QLabel#dropHint {{ font-size:12px; color:{faint}; }}
+
+/* ── szkielety podczas skanowania ── */
+QFrame#skel {{ background:{panel}; border:1px solid {line};
+              border-radius:{r_lg}px; }}
+QFrame#skelBar {{ background:{panel2}; border-radius:{r_sm}px; }}
+
+QAbstractScrollArea, QScrollArea, QWidget#gridHost {{ background:transparent; }}
 
 /* ── pasek przewijania ── */
-QScrollBar:vertical { background:transparent; width:10px; margin:0; }
-QScrollBar::handle:vertical { background:#243044; border-radius:4px; min-height:40px; }
-QScrollBar::handle:vertical:hover { background:#3d5bff; }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background:none; }
+QScrollBar:vertical {{ background:transparent; width:8px; margin:0; }}
+QScrollBar::handle:vertical {{ background:{line_strong}; border-radius:{r_full}px;
+                               min-height:40px; }}
+QScrollBar::handle:vertical:hover {{ background:{faint}; }}
+QScrollBar:horizontal {{ background:transparent; height:8px; }}
+QScrollBar::handle:horizontal {{ background:{line_strong};
+                                 border-radius:{r_full}px; min-width:40px; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background:none; }}
+QScrollBar::handle {{ border:none; }}
 
 /* ── toast ── */
-QFrame#toast { background:#141b28; border:1px solid #243044; border-radius:10px; }
-QLabel#toastTitle { font-size:13px; font-weight:600; }
-QLabel#toastBody { color:#7b8798; font-size:12px; }
+QFrame#toast {{ background:{popover}; border:1px solid {line_strong};
+               border-radius:{r_lg}px; }}
+QLabel#toastTitle {{ font-size:14px; font-weight:600; }}
+QLabel#toastBody {{ font-size:12px; color:{muted}; }}
 
-QDialog { background:#0b0e14; }
-QLineEdit, QTextEdit { background:#141b28; color:#f2f5fa; border:1px solid #243044;
-                       border-radius:8px; padding:9px; font-size:13px; }
-QLineEdit:focus, QTextEdit:focus { border:1px solid #3d5bff; }
-QLabel#hint { color:#4a5568; font-size:11px; }"""
+/* ── dialog / pola ── */
+QDialog {{ background:{bg}; }}
+QTextEdit, QLineEdit {{
+    background:{panel}; color:{fg};
+    border:1px solid {line_strong}; border-radius:{r_md}px;
+    padding:10px 12px; font-size:14px; selection-background-color:{accent};
+}}
+QTextEdit:focus, QLineEdit:focus {{ border-color:{ring}; }}
+QLabel#hint {{ font-size:12px; color:{faint}; }}
+QLabel#dlgTitle {{ font-size:24px; font-weight:600; letter-spacing:-0.00625em; }}
+"""
 
-BG = '#0b0e14'
-PANEL = '#141b28'
-PANEL2 = '#1c2534'
-LINE = '#243044'
-FG = '#f2f5fa'
-FG2 = '#c7d0de'
-DIM = '#7b8798'
-FAINT = '#4a5568'
-ACC = '#3d5bff'
-RED = '#ff5c62'
-AMB = '#ffb224'
-GRN = '#2fd07f'
+# Wygodne aliasy — jedyne miejsce, gdzie kolory są mapowane na nazwy
+# używane w kodzie. Wartości z theme.py (Radix Colors dark / shadcn).
+import theme as T
+
+BG = T.BG
+PANEL = T.PANEL
+PANEL2 = T.PANEL_2
+PANEL3 = T.PANEL_3
+LINE = T.BORDER
+FG = T.FG
+FG2 = T.FG_MUTED
+DIM = T.FG_MUTED
+FAINT = T.FG_SUBTLE
+ACC = T.ACCENT
+RED = T.DANGER
+AMB = T.WARN
+GRN = T.OK
+WARN = T.WARN
+
+
+CARD_W = 228   # stal szerokosc karty: kolumny liczone dokladnie, bez
+               # zgadywania i bez obcinania prawej kolumny
+
+
+def thumb_pixels(path, box=(224, 132)):
+    """Zwraca surowe bajty RGB + rozmiar - bez QPixmap.
+
+    QPixMap NIE WOLNO tworzyc poza watkiem GUI (Qt tego zabrania i miniatury
+    wychodza puste). QImage juz moze. Decoding PIL-a robimy w watku roboczym,
+    zeby nie mrozic interfejsu, a zamiane na pixmap zostawiamy GUI.
+    """
+    from PIL import Image
+    try:
+        im = Image.open(path)
+        im.draft('RGB', (box[0] * 2, box[1] * 2))
+        im = im.convert('RGB')
+        im.thumbnail(box)
+        return im.width, im.height, im.tobytes('raw', 'RGB')
+    except Exception:
+        return 0, 0, b''
+
+
+def pixels_to_pixmap(w, h, data):
+    """Robie w watku GUI - tu dopiero QPixmap jest dozwolony."""
+    if not w or not h:
+        return None
+    qim = QtGui.QImage(data, w, h, w * 3, QtGui.QImage.Format_RGB888).copy()
+    return QtGui.QPixmap.fromImage(qim)
 
 
 def human(n):
@@ -112,117 +246,189 @@ def human(n):
 
 
 class Card(QtWidgets.QFrame):
-    clicked = QtCore.Signal(object)
-    entered = QtCore.Signal(object)
+    """Karta pliku — jeden element, jeden klik, jeden komunikat.
 
-    def __init__(self, rep, thumb, label, risk):
+    Zasady, ktore tu stosuje:
+      Fitts        — cala karta jest celem, nie tylko jej naglowek
+      Von Restorff — najgorszy plik ma inny border (worst=true), reszta jest
+                     neutralna; sam kolor NIE jest jedynym nośnikiem informacji,
+                     bo kazda etykieta ma tekst
+      Common region — nazwa + metadane w jednym zamknietym obszarze
+    """
+
+    def __init__(self, rep, thumb, label, risk, worst=False, selected=False):
         super().__init__()
         self.rep = rep
         self.setObjectName('card')
         self.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.setAttribute(QtCore.Qt.WA_Hover, True)
+        self.setProperty('worst', 'true' if worst else 'false')
+        self.setProperty('sel', 'true' if selected else 'false')
+        self.setFocusPolicy(QtCore.Qt.StrongFocus)
+
         if not rep.findings:
-            self.col = GRN
+            col = GRN
         elif any(f.risk == 'HIGH' for f in rep.findings):
-            self.col = RED
+            col = RED
         else:
-            self.col = AMB
+            col = AMB
 
         v = QtWidgets.QVBoxLayout(self)
-        v.setContentsMargins(9, 9, 9, 9)
-        v.setSpacing(6)
+        v.setContentsMargins(12, 12, 12, 12)
+        v.setSpacing(8)
 
+        thumb_box = QtWidgets.QVBoxLayout()
+        thumb_box.setContentsMargins(0, 0, 0, 0)
         self.thumb = QtWidgets.QLabel()
-        self.thumb.setObjectName('cardThumb')
-        self.thumb.setFixedHeight(112)
+        self.thumb.setObjectName('thumb')
+        self.thumb.setFixedSize(CARD_W - 24, 132)
         self.thumb.setAlignment(QtCore.Qt.AlignCenter)
-        if thumb is not None:
-            self.thumb.setPixmap(thumb)
-        v.addWidget(self.thumb)
+        if thumb is not None and not thumb.isNull():
+            self.thumb.setPixmap(thumb.scaled(
+                self.thumb.width() - 2, self.thumb.height() - 2,
+                QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+        thumb_box.addWidget(self.thumb)
+        v.addLayout(thumb_box)
 
-        name = os.path.basename(rep.path)
-        if len(name) > 28:
-            stem, ext = os.path.splitext(name)
-            name = stem[:18] + '…' + ext[-6:]
-        nl = QtWidgets.QLabel(name)
+        # Nazwa pliku skracana do szerokosci karty. Bez tego dlugie nazwy
+        # wychodza poza karty i rozjezdzaja kolumne ('poprzesuwane').
+        nl = QtWidgets.QLabel()
         nl.setObjectName('cardName')
         nl.setToolTip(rep.path)
+        nl.setText(QtGui.QFontMetrics(nl.font()).elidedText(
+            os.path.basename(rep.path), QtCore.Qt.ElideMiddle, CARD_W - 24))
         v.addWidget(nl)
 
         row = QtWidgets.QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
-        b = QtWidgets.QLabel(label)
+        row.setSpacing(8)
+        b = QtWidgets.QLabel()
         b.setObjectName('cardBadge')
-        b.setStyleSheet(f'color:{self.col}')
-        row.addWidget(b)
-        row.addStretch(1)
-        if risk is not None:
+        b.setStyleSheet(f'color:{col};')
+        # skracamy etykiete, nie pole rozciagajace - dlugi wyraz wypychal
+        # liczbe ryzyka poza karty
+        b.setText(QtGui.QFontMetrics(b.font()).elidedText(
+            label, QtCore.Qt.ElideRight, CARD_W - 108))
+        row.addWidget(b, 1)
+        if worst:
+            tag = QtWidgets.QLabel('NAJGORSZY')
+            tag.setObjectName('worstTag')
+            row.addWidget(tag, 0, QtCore.Qt.AlignRight)
+        elif risk is not None:
             r = QtWidgets.QLabel(str(risk))
             r.setObjectName('cardRisk')
-            r.setStyleSheet(f'color:{self.col}')
-            row.addWidget(r)
+            r.setStyleSheet(f'color:{col};')
+            row.addWidget(r, 0, QtCore.Qt.AlignRight)
         v.addLayout(row)
 
         for w in (self, self.thumb, nl):
             w.mousePressEvent = self._press
-            w.mouseEnterEvent = self._enter
+
+    def mark_selected(self, on):
+        self.setProperty('sel', 'true' if on else 'false')
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def _press(self, _e=None):
         self.clicked.emit(self.rep)
 
-    def _enter(self, _e=None):
-        self.entered.emit(self.rep)
+    def contextMenuEvent(self, e):
+        # GNOME: "Menu / Shift+F10 - Open context menu for focused location"
+        m = QtWidgets.QMenu(self)
+        a = m.addAction('Usun metadane z tego pliku')
+        a.triggered.connect(lambda: self.clean_one.emit(self.rep))
+        m.addSeparator()
+        m.addAction('Pokaz sciezke').triggered.connect(
+            lambda: QtWidgets.QApplication.clipboard().setText(self.rep.path))
+        m.exec(e.globalPos())
+
+    clean_one = QtCore.Signal(object)
+
+    def keyPressEvent(self, e):
+        # GNOME: "Return – Activate the focused control or content item".
+        # Bez tego siatka kart byla calkowicie niedostepna z klawiatury.
+        if e.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter,
+                       QtCore.Qt.Key_Space):
+            self.clicked.emit(self.rep)
+            e.accept()
+            return
+        super().keyPressEvent(e)
+
+    def focusInEvent(self, e):
+        # widoczny fokus (WCAG / GNOME: nie polegaj tylko na kolorze)
+        self.setStyleSheet(f'QFrame#card {{ border: 2px solid {ACC};'
+                           f' border-radius:{T.RADIUS_LG}px; }}')
+        super().focusInEvent(e)
+
+    def focusOutEvent(self, e):
+        self.setStyleSheet('')
+        super().focusOutEvent(e)
+
+    clicked = QtCore.Signal(object)
 
 
 class DropZone(QtWidgets.QFrame):
+    """Glowna sciezka (Hick: jedna oczywista akcja na ekranie)."""
+
     clicked = QtCore.Signal()
     files = QtCore.Signal(list)
 
     def __init__(self):
         super().__init__()
         self.setObjectName('drop')
-        self.setMinimumHeight(150)
         self.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.setAcceptDrops(True)
+        self.setMinimumHeight(260)
+
         v = QtWidgets.QVBoxLayout(self)
         v.setAlignment(QtCore.Qt.AlignCenter)
-        v.setSpacing(6)
+        v.setSpacing(8)
 
-        self.stack = QtWidgets.QLabel()
-        self.stack.setPixmap(self._stack_icon())
-        self.stack.setAlignment(QtCore.Qt.AlignCenter)
-        v.addWidget(self.stack)
+        ico = QtWidgets.QLabel()
+        ico.setPixmap(self._icon())
+        ico.setAlignment(QtCore.Qt.AlignCenter)
+        v.addWidget(ico)
+        v.addSpacing(8)
 
         t = QtWidgets.QLabel('Upuść zdjęcia lub filmy')
         t.setObjectName('dropTitle')
         t.setAlignment(QtCore.Qt.AlignCenter)
         v.addWidget(t)
+
         s = QtWidgets.QLabel('albo kliknij, żeby wybrać pliki')
         s.setObjectName('dropSub')
         s.setAlignment(QtCore.Qt.AlignCenter)
         v.addWidget(s)
+        v.addSpacing(4)
+
+        h = QtWidgets.QLabel('JPG · PNG · TIFF · WEBP · HEIC · AVIF · GIF · MP4')
+        h.setObjectName('dropHint')
+        h.setAlignment(QtCore.Qt.AlignCenter)
+        v.addWidget(h)
 
     @staticmethod
-    def _stack_icon():
-        pm = QtGui.QPixmap(64, 52)
+    def _icon():
+        pm = QtGui.QPixmap(96, 80)
         pm.fill(QtCore.Qt.transparent)
         p = QtGui.QPainter(pm)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
-        for i in range(3):
-            x = 6 + i * 9
-            y = 6 + i * 5
-            p.setPen(QtGui.QPen(QtGui.QColor('#2a3a52'), 2))
-            p.setBrush(QtGui.QBrush(QtGui.QColor('#0b0e14')))
-            p.drawRoundedRect(x, y, 42, 32, 6, 6)
-            p.setPen(QtCore.Qt.NoPen)
-            p.setBrush(QtGui.QBrush(QtGui.QColor('#243044')))
-            p.drawPolygon(QtGui.QPolygon([QtCore.QPoint(x + 2, y + 22),
-                                          QtCore.QPoint(x + 12, y + 12),
-                                          QtCore.QPoint(x + 20, y + 20),
-                                          QtCore.QPoint(x + 26, y + 13),
-                                          QtCore.QPoint(x + 40, y + 24)]))
-        p.setPen(QtGui.QPen(QtGui.QColor('#3d5bff'), 2))
-        p.setBrush(QtCore.Qt.NoBrush)
-        p.drawRoundedRect(6, 6, 42, 32, 6, 6)
+        pen = QtGui.QPen(QtGui.QColor(FG2), 2)
+        box = QtGui.QPen(QtGui.QColor(FG2), 2)
+        # stos zdjec — dwa obrysy pod spodem, jeden na wierzchu
+        for dx, dy in ((10, 14), (6, 7)):
+            p.setPen(box)
+            p.setBrush(QtGui.QBrush(QtGui.QColor(BG)))
+            p.drawRoundedRect(dx, dy, 64, 48, 8, 8)
+        p.setBrush(QtGui.QBrush(QtGui.QColor(PANEL2)))
+        p.setPen(pen)
+        p.drawRoundedRect(2, 0, 64, 48, 8, 8)
+        p.setPen(QtCore.Qt.NoPen)
+        p.setBrush(QtGui.QBrush(QtGui.QColor(ACC)))
+        p.drawPolygon(QtGui.QPolygon([
+            QtCore.QPoint(6, 42), QtCore.QPoint(24, 20), QtCore.QPoint(36, 34),
+            QtCore.QPoint(46, 22), QtCore.QPoint(62, 42)]))
+        p.setBrush(QtGui.QBrush(QtGui.QColor(WARN)))
+        p.drawEllipse(48, 8, 9, 9)
         p.end()
         return pm
 
@@ -251,6 +457,8 @@ class DropZone(QtWidgets.QFrame):
 
 
 class Toast(QtWidgets.QFrame):
+    """Potwierdzenie akcji. Peak-End Rule: koniec musi byc spokojny i jasny."""
+
     def __init__(self, parent):
         super().__init__(parent)
         self.setObjectName('toast')
@@ -260,22 +468,22 @@ class Toast(QtWidgets.QFrame):
         self.hide()
 
     def show_toast(self, title, body='', kind='info', ms=4600):
-        while self.layout().count():
+        while self.layout() and self.layout().count():
             it = self.layout().takeAt(0)
             if it.widget():
                 it.widget().deleteLater()
         col = {'info': ACC, 'ok': GRN, 'warn': AMB, 'err': RED}[kind]
         h = QtWidgets.QHBoxLayout(self)
-        h.setContentsMargins(0, 0, 12, 0)
+        h.setContentsMargins(0, 0, 16, 0)
         bar = QtWidgets.QFrame()
         bar.setFixedWidth(3)
         bar.setStyleSheet(f'background:{col}; border-radius:2px;')
         h.addWidget(bar)
         box = QtWidgets.QVBoxLayout()
-        box.setContentsMargins(12, 10, 0, 10)
+        box.setContentsMargins(16, 12, 0, 12)
+        box.setSpacing(2)
         t = QtWidgets.QLabel(title)
         t.setObjectName('toastTitle')
-        t.setStyleSheet(f'color:{FG}')
         box.addWidget(t)
         if body:
             b = QtWidgets.QLabel(body)
@@ -283,49 +491,117 @@ class Toast(QtWidgets.QFrame):
             b.setWordWrap(True)
             box.addWidget(b)
         h.addLayout(box, 1)
-        self.setStyleSheet(f'QFrame#toast {{ background:{PANEL}; border:1px solid {LINE};'
-                           f' border-radius:10px; }}')
         self.show()
+        self.raise_()
         self._timer.start(ms)
+
+
+def skeleton_grid(host, cols, rows):
+    """Szkielety podczas skanowania (Doherty: 400 ms na informacje zwrotne).
+
+    Uzytkownik widzi strukture bez czekania na pierwszy wynik.
+    """
+    while host.count():
+        it = host.takeAt(0)
+        if it.widget():
+            it.widget().deleteLater()
+    for i in range(cols * rows):
+        f = QtWidgets.QFrame()
+        f.setObjectName('skel')
+        f.setFixedSize(CARD_W, 212)
+        v = QtWidgets.QVBoxLayout(f)
+        v.setContentsMargins(12, 12, 12, 12)
+        v.setSpacing(10)
+        bar = QtWidgets.QFrame()
+        bar.setObjectName('skelBar')
+        bar.setFixedHeight(132)
+        v.addWidget(bar)
+        for hgt in (11, 11):
+            ln = QtWidgets.QFrame()
+            ln.setObjectName('skelBar')
+            ln.setFixedHeight(hgt)
+            ln.setFixedWidth(CARD_W - 60 if hgt == 11 and ln is not None else 0 or 120)
+            v.addWidget(ln)
+        host.addWidget(f, i // cols, i % cols)
+
+
+def findings_groups(rep):
+    """Grupuje znaleziska w kategorie (Miller: chunking, nie sciana tekstu).
+
+    Kolejnosc = od najwazniejszego: lokalizacja, tozsamosc, sprzet, prawa,
+    czas, reszta. Zwraca [(kategoria, [finding, ...]), ...].
+    """
+    buckets = {}
+    order = []
+    for f in rep.findings:
+        key = f.kind.lower()
+        bucket = ('lokalizacja' if 'gps' in key or 'lokal' in key else
+                  'tozsamosc' if any(w in key for w in
+                                     ('copyright', 'author', 'owner', 'serial',
+                                      'credit', 'tozsam')) else
+                  'sprzet' if any(w in key for w in
+                                  ('software', 'model', 'make', 'lens', 'device',
+                                   'body', 'camera')) else
+                  'czas' if 'date' in key or 'time' in key else
+                  'tekst' if any(w in key for w in
+                                 ('comment', 'description', 'title',
+                                  'caption')) else 'inne')
+        if bucket not in buckets:
+            buckets[bucket] = []
+            order.append(bucket)
+        buckets[bucket].append(f)
+    rank = ['lokalizacja', 'tozsamosc', 'sprzet', 'prawa', 'czas', 'tekst',
+            'inne']
+    order.sort(key=lambda k: rank.index(k) if k in rank else 99)
+    return [(k, buckets[k]) for k in order]
 
 
 class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('photoscrub')
-        self.resize(1180, 820)
-        self.setMinimumSize(1000, 660)
+        # GNOME: "smallest recommended display size for GNOME on desktop is
+        # currently 1024x600px, and this size should be supported by all apps".
+        self.resize(1280, 860)
+        self.setMinimumSize(T.MIN_WINDOW_W, T.MIN_WINDOW_H)
         self.setAcceptDrops(True)
         self.rows = []
+        self._thumbs = {}
         self.selected = None
         self.ruleset = rs.CURRENT
+        self._cards = {}
+        self._last_w = self.width()
+        self._recol_busy = False
 
         c = QtWidgets.QWidget()
         self.setCentralWidget(c)
         root = QtWidgets.QVBoxLayout(c)
-        root.setContentsMargins(26, 20, 26, 18)
+        root.setContentsMargins(24, 20, 24, 20)   # wielokrotnosci 4
         root.setSpacing(0)
 
         root.addLayout(self._header())
-        self.headline = QtWidgets.QLabel('Upuść pliki, żeby zobaczyć co ujawniają')
-        self.headline.setObjectName('headline')
-        root.addWidget(self.headline)
-        self.subline = QtWidgets.QLabel('Paswywnie. Zero sieci, zero konta. '
-                                        'Oryginały zostają tam, gdzie są.')
-        self.subline.setObjectName('subline')
-        root.addWidget(self.subline)
-        root.addSpacing(12)
+        root.addSpacing(24)
+
+        self.title = QtWidgets.QLabel('Zobacz, co Twoje zdjęcia zdradzają')
+        self.title.setObjectName('title')
+        root.addWidget(self.title)
+        self.subtitle = QtWidgets.QLabel(
+            'Paswywnie i offline. Oryginały zostają tam, gdzie są.')
+        self.subtitle.setObjectName('subtitle')
+        root.addWidget(self.subtitle)
+        root.addSpacing(24)
 
         self.stats = self._stats()
         root.addLayout(self.stats)
-        root.addSpacing(12)
+        root.addSpacing(16)
 
         self.progress = QtWidgets.QProgressBar()
         self.progress.setTextVisible(False)
         self.progress.setRange(0, 100)
-        self.progress.setFixedHeight(3)
+        self.progress.setFixedHeight(4)
         self.progress.hide()
         root.addWidget(self.progress)
+        root.addSpacing(16)
 
         body = QtWidgets.QHBoxLayout()
         body.setSpacing(16)
@@ -334,16 +610,18 @@ class Window(QtWidgets.QMainWindow):
         self.drop = DropZone()
         self.drop.clicked.connect(self.add_files)
         self.drop.files.connect(self.add_paths)
+
         self.scroll = QtWidgets.QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-        self.scroll.hide()
         self.grid_host = QtWidgets.QWidget()
         self.grid = QtWidgets.QGridLayout(self.grid_host)
-        self.grid.setSpacing(12)
+        self.grid.setSpacing(16)
+        self.grid.setContentsMargins(0, 0, 8, 0)
         self.grid.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
         self.scroll.setWidget(self.grid_host)
+
         # JEDEN kontener na dwie zawartosci. Dwa osobne widgety w poziomym
         # ukladzie dziela sie polowa szerokosci - karty dostawaly polowe okna
         # i kolumna po prawej byla obcieta.
@@ -354,121 +632,234 @@ class Window(QtWidgets.QMainWindow):
 
         self.side = QtWidgets.QFrame()
         self.side.setObjectName('side')
-        self.side.setFixedWidth(350)
+        # GNOME adaptive: "sidebars should never look excessively wide or
+        # narrow in relation to the main window area" — panel jest staly, ale
+        # przy bardzo waskim oknie ustępuje miejsca siatce kart.
+        self.side.setFixedWidth(T.SIDE_W)
+        self.side.setMinimumWidth(280)
+        self.side.setMaximumWidth(T.SIDE_W)
         sv = QtWidgets.QVBoxLayout(self.side)
-        sv.setContentsMargins(16, 14, 16, 14)
+        sv.setContentsMargins(20, 20, 20, 20)
         sv.setSpacing(8)
-        t = QtWidgets.QLabel('SZCZEGÓŁY')
-        t.setObjectName('panelTitle')
-        sv.addWidget(t)
+
+        lbl = QtWidgets.QLabel('SZCZEGÓŁY')
+        lbl.setObjectName('panelLabel')
+        sv.addWidget(lbl)
+        sv.addSpacing(4)
+
         self.file_name = QtWidgets.QLabel('—')
         self.file_name.setObjectName('fileName')
         self.file_name.setWordWrap(True)
         sv.addWidget(self.file_name)
+        self.file_meta = QtWidgets.QLabel('')
+        self.file_meta.setObjectName('fileMeta')
+        sv.addWidget(self.file_meta)
+        sv.addSpacing(8)
+
+        sep = QtWidgets.QFrame()
+        sep.setFrameShape(QtWidgets.QFrame.HLine)
+        sep.setStyleSheet(f'color:{LINE}; background:{LINE};'
+                          f' max-height:1px; min-height:1px; border:none;')
+        sv.addWidget(sep)
+        sv.addSpacing(8)
+
         self.detail = QtWidgets.QTextBrowser()
         self.detail.setObjectName('detail')
         self.detail.setOpenExternalLinks(False)
         sv.addWidget(self.detail, 1)
-        self._reset_detail()
-        sep = QtWidgets.QFrame()
-        sep.setObjectName('sep')
-        sep.setFixedHeight(1)
-        sv.addWidget(sep)
-        n = QtWidgets.QLabel('JAK TO DZIAŁA\n\n'
-                             '·  Pasywne DNS i bajty pliku. Zero skanowania, zero sieci.\n'
-                             '·  Oryginały nigdy nie są modyfikowane — zapisujemy kopie.\n'
-                             '·  Najbardziej podstępny wyciek: miniaturka wbudowana '
-                             'w JPEG to często całe oryginalne zdjęcie.')
-        n.setObjectName('notes')
-        n.setWordWrap(True)
-        sv.addWidget(n)
+
+        # Jak to dziala jest informacja drugorzedna (Hick) - schowana pod
+        # jednym przyciskiem zamiast zajmowac 1/3 panelu na ekranie.
+        more = QtWidgets.QPushButton('Jak to działa')
+        more.setProperty('variant', 'ghost')
+        more.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        more.clicked.connect(self._about)
+        sv.addWidget(more)
         body.addWidget(self.side)
 
         foot = QtWidgets.QHBoxLayout()
-        foot.setSpacing(14)
-        self.cta = QtWidgets.QPushButton('Usuń metadane ze wszystkich')
-        self.cta.setProperty('cta', True)
+        foot.setSpacing(16)
+        self.cta = QtWidgets.QPushButton('Usuń metadane')
+        self.cta.setProperty('variant', 'solid')
+        self.cta.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.cta.setEnabled(False)
         self.cta.clicked.connect(self.clean)
         foot.addWidget(self.cta)
         self.status = QtWidgets.QLabel('')
-        self.status.setObjectName('subline')
+        self.status.setObjectName('subtitle')
         foot.addWidget(self.status, 1)
-        root.addSpacing(10)
+        self.count = QtWidgets.QLabel('')
+        self.count.setObjectName('panelLabel')
+        foot.addWidget(self.count)
+        root.addSpacing(16)
         root.addLayout(foot)
 
-        self.toast = Toast(self)
-        self.toast.setParent(c)
-        self.toast.setFixedWidth(640)
+        self.toast = Toast(c)
+        self.toast.setFixedWidth(600)
 
+        self._reset_detail()
         self._worker = None
         self._thread = None
+        self._build_menu()
+        # Pasek menu ma byc niewidoczny — aplikacja nie ma pliku, a skroty
+        # i tak sa w menu kontekstowym oraz w tooltipach.
+        self.menuBar().setVisible(False)
         QtCore.QTimer.singleShot(120, self._gate)
 
-    # ── layout helpers ────────────────────────────────────────────────────────
+    # ── naglowek ──────────────────────────────────────────────────────────────
     def _header(self):
         h = QtWidgets.QHBoxLayout()
+        h.setSpacing(12)
         logo = QtWidgets.QLabel()
         pm = QtGui.QPixmap(28, 28)
         pm.fill(QtCore.Qt.transparent)
         p = QtGui.QPainter(pm)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         p.setPen(QtGui.QPen(QtGui.QColor(ACC), 2))
+        p.setBrush(QtCore.Qt.NoBrush)
         p.drawEllipse(2, 2, 24, 24)
         p.setPen(QtCore.Qt.NoPen)
         p.setBrush(QtGui.QBrush(QtGui.QColor(ACC)))
-        p.drawEllipse(9, 9, 10, 10)
+        p.drawEllipse(10, 10, 8, 8)
         p.end()
         logo.setPixmap(pm)
         h.addWidget(logo)
-        h.addSpacing(10)
+
         names = QtWidgets.QVBoxLayout()
         names.setSpacing(0)
         n = QtWidgets.QLabel('photoscrub')
-        n.setObjectName('logo')
+        n.setObjectName('brand')
         names.addWidget(n)
         tg = QtWidgets.QLabel('zanim wrzucisz to do sieci')
         tg.setObjectName('tagline')
         names.addWidget(tg)
         h.addLayout(names)
         h.addStretch(1)
-        bf = QtWidgets.QPushButton('Wybierz folder')
-        bf.clicked.connect(self.add_folder)
-        h.addWidget(bf)
-        bfl = QtWidgets.QPushButton('Dodaj pliki')
-        bfl.clicked.connect(self.add_files)
-        h.addWidget(bfl)
+
+        for text, slot, key in (('Wybierz folder', self.add_folder,
+                                 'Ctrl+D'),
+                                ('Dodaj pliki', self.add_files, 'Ctrl+O')):
+            b = QtWidgets.QPushButton(text)
+            b.setProperty('variant', 'ghost')
+            b.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+            b.clicked.connect(slot)
+            # skrot widoczny w tooltip - inaczej nikt o nim nie wie
+            b.setToolTip(f'{text} ({key})')
+            h.addWidget(b)
+        h.addSpacing(4)
+        about = QtWidgets.QPushButton('?')
+        about.setProperty('variant', 'ghost')
+        about.setFixedWidth(32)
+        about.setToolTip('Jak to działa')
+        about.clicked.connect(self._about)
+        h.addWidget(about)
         return h
 
+    # ── menu glowne (F10) + skroty (GNOME guidelines/keyboard) ────────────
+    def _build_menu(self):
+        # GNOME: "F10 - Open primary or secondary menu". Uzytkownik musi
+        # miec jeden place, gdzie widzi WSZYSTKIE akcje i ich skroty.
+        m = self.menuBar()
+        # pasek jest wlasciwie niewidoczny (tlo = tlo aplikacji, brak ramek),
+        # a jego rola to F10 + skroty. GNOME: "F10 - open primary menu".
+        m.setNativeMenuBar(False)
+        f = m.addMenu('&Plik')
+        a = f.addAction('Dodaj pliki...', self.add_files)
+        a.setShortcut('Ctrl+O')
+        a = f.addAction('Wybierz folder...', self.add_folder)
+        a.setShortcut('Ctrl+D')
+        f.addSeparator()
+        f.addAction('Zamknij', self.close).setShortcut('Ctrl+Q')
+        sm = m.addMenu('&Akcje')
+        a = sm.addAction('Skanuj ponownie',
+                         lambda: self.add_paths([r.path for r, _ in self.rows]))
+        a.setShortcut('Ctrl+R')
+        a = sm.addAction('Usun metadane', self.clean)
+        a.setShortcut('Ctrl+E')
+        sm.addSeparator()
+        sm.addAction('Jak to dziala', self._about).setShortcut('F1')
+        return m
+
+    def keyPressEvent(self, e):
+        # GNOME: "Esc - Close the current container, if it is transient".
+        if e.key() == QtCore.Qt.Key_Escape:
+            if self.selected is not None and len(self.rows) > 1:
+                self.show_detail(self.rows[0][0])
+            else:
+                self.close()
+            e.accept()
+            return
+        super().keyPressEvent(e)
+
+    # ── statystyki (chunking: 5 liczb, nie 12) ───────────────────────────────
     def _stats(self):
         row = QtWidgets.QHBoxLayout()
-        row.setSpacing(30)
+        row.setSpacing(32)
         self.stat_vals = {}
-        for key, col in (('files', DIM), ('dirty', RED), ('high', RED),
-                         ('clean', GRN), ('risk', AMB)):
+        tiles = (('files', 'plików', DIM), ('dirty', 'z danymi', RED),
+                 ('high', 'pilne', RED), ('clean', 'czyste', GRN),
+                 ('risk', 'ryzyko /100', AMB))
+        for key, label, col in tiles:
             box = QtWidgets.QVBoxLayout()
             box.setSpacing(0)
             v = QtWidgets.QLabel('0')
-            v.setObjectName('statValue')
-            v.setStyleSheet(f'color:{col}')
-            l = QtWidgets.QLabel(key)
-            l.setObjectName('statLabel')
+            v.setObjectName('title')
+            v.setStyleSheet(f'color:{col}; font-size:24px; font-weight:600;'
+                            f' letter-spacing:-0.00625em;')
+            l = QtWidgets.QLabel(label)
+            l.setObjectName('panelLabel')
             box.addWidget(v)
             box.addWidget(l)
-            row.addLayout(box)
+            holder = QtWidgets.QWidget()
+            holder.setFixedWidth(132)
+            holder.setLayout(box)
+            row.addWidget(holder)
             self.stat_vals[key] = (v, l)
+        row.addStretch(1)
         return row
 
-    def _set_stat(self, key, value, label):
+    def _set_stat(self, key, value, label=None):
         v, l = self.stat_vals[key]
         v.setText(str(value))
-        l.setText(label)
+        if label:
+            l.setText(label)
 
     def _reset_detail(self):
         self.file_name.setText('—')
+        self.file_meta.setText('')
         self.detail.setHtml(
-            f'<span style="color:{DIM}">Kliknij kartę zdjęcia, żeby zobaczyć,<br>'
-            'co dokładnie ujawnia i dlaczego to problem.</span>')
+            f'<p style="color:{FAINT}">Kliknij kartę zdjęcia, żeby zobaczyć, '
+            'co dokładnie ujawnia i dlaczego to problem.</p>')
+
+    def _about(self):
+        d = QtWidgets.QDialog(self)
+        d.setWindowTitle('Jak to działa')
+        d.setModal(True)
+        d.setFixedWidth(560)
+        v = QtWidgets.QVBoxLayout(d)
+        v.setContentsMargins(28, 28, 28, 28)
+        v.setSpacing(12)
+        t = QtWidgets.QLabel('Jak to działa')
+        t.setObjectName('dlgTitle')
+        v.addWidget(t)
+        b = QtWidgets.QTextBrowser()
+        b.setObjectName('detail')
+        b.setHtml(
+            f'<p>photoscrub czyta <b>bajty pliku</b> i <b>DNS</b> — nic więcej. '
+            'Nie ma skanowania, nie ma konta, nie ma połączenia z serwerem.</p>'
+            f'<p>Oryginałów nigdy nie modyfikujemy. Zapisujemy czyste kopie '
+            'w innym folderze.</p>'
+            f'<p>Najbardziej podstępny wyciek to miniaturka wbudowana w JPEG — '
+            'często jest w niej całe oryginalne zdjęcie, w rozdzielczości pełnej.</p>'
+            f'<p>Wynik ryzyka (0–100) liczy nasz własny model: 15 cech pliku, '
+            'klasyfikator logistyczny wytrenowany na 8000 syntetycznych '
+            'profilach. To nie jest model językowy — nie zmyśla, liczy.</p>')
+        v.addWidget(b, 1)
+        ok = QtWidgets.QPushButton('Rozumiem')
+        ok.setProperty('variant', 'solid')
+        ok.clicked.connect(d.accept)
+        v.addWidget(ok)
+        d.exec()
 
     # ── licencja ─────────────────────────────────────────────────────────────
     def _license(self):
@@ -488,31 +879,30 @@ class Window(QtWidgets.QMainWindow):
                 self.status.setStyleSheet(f'color:{AMB}')
             elif ups:
                 u = ups[0]
-                self.status.setText(f'Reguły v{rv} · nowsze reguły v{u["version"]} '
-                                    f'dostępne — ' + ' · '.join(n for n, _ in u['new'][:3]))
+                self.status.setText(
+                    f'Reguły v{rv} · nowsze reguły v{u["version"]} dostępne — '
+                    + ' · '.join(n for n, _ in u['new'][:3]))
                 self.status.setStyleSheet(f'color:{AMB}')
             else:
                 self.status.setText(f'licencja aktywna · reguły v{rv}')
                 self.status.setStyleSheet(f'color:{GRN}')
             return
-        self._activate(info if st != 'brak' else 'Wklej klucz, który dostałeś mailem.')
+        self._activate(info if st != 'brak' else 'Wklej klucz, który dostałeś '
+                                               'mailem.')
 
     def _activate(self, message):
         d = QtWidgets.QDialog(self)
         d.setWindowTitle('photoscrub — aktywacja')
         d.setModal(True)
-        d.setFixedWidth(520)
+        d.setFixedWidth(560)
         v = QtWidgets.QVBoxLayout(d)
-        v.setContentsMargins(28, 26, 28, 26)
-        v.setSpacing(10)
-        h = QtWidgets.QLabel('🔑')
-        h.setStyleSheet('font-size:30px')
-        v.addWidget(h)
+        v.setContentsMargins(28, 28, 28, 28)
+        v.setSpacing(12)
         t = QtWidgets.QLabel('Klucz aktywacyjny')
-        t.setStyleSheet(f'font-size:24px;font-weight:700;color:{FG}')
+        t.setObjectName('dlgTitle')
         v.addWidget(t)
         m = QtWidgets.QLabel(message)
-        m.setStyleSheet(f'color:{DIM};font-size:13px')
+        m.setObjectName('subtitle')
         m.setWordWrap(True)
         v.addWidget(m)
         e = QtWidgets.QTextEdit()
@@ -520,17 +910,18 @@ class Window(QtWidgets.QMainWindow):
         e.setFixedHeight(120)
         v.addWidget(e)
         row = QtWidgets.QHBoxLayout()
+        row.setSpacing(8)
         paste = QtWidgets.QPushButton('Wklej ze schowka')
         paste.clicked.connect(lambda: e.insertPlainText(
             QtWidgets.QApplication.clipboard().text()))
         row.addWidget(paste)
         row.addStretch(1)
         ok = QtWidgets.QPushButton('Aktywuj')
-        ok.setProperty('cta', True)
+        ok.setProperty('variant', 'solid')
         row.addWidget(ok)
         v.addLayout(row)
         out = QtWidgets.QLabel('')
-        out.setStyleSheet(f'color:{RED}')
+        out.setStyleSheet(f'color:{RED};')
         out.setWordWrap(True)
         v.addWidget(out)
         hint = QtWidgets.QLabel(f'twoja maszyna: {lic.machine_id()[:16]}')
@@ -547,7 +938,7 @@ class Window(QtWidgets.QMainWindow):
         ok.clicked.connect(go)
         d.exec()
 
-    # ── wejście ──────────────────────────────────────────────────────────────
+    # ── wejscie ──────────────────────────────────────────────────────────────
     def dragEnterEvent(self, e):
         if e.mimeData().hasUrls():
             e.acceptProposedAction()
@@ -558,13 +949,14 @@ class Window(QtWidgets.QMainWindow):
     def add_files(self):
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self, 'Wybierz zdjęcia i filmy', '',
-            'Zdjęcia i filmy (*.jpg *.jpeg *.png *.tif *.tiff *.webp *.heic *.heif '
-            '*.avif *.gif *.bmp *.mp4 *.mov *.m4v);;Wszystkie pliki (*)')
+            'Zdjęcia i filmy (*.jpg *.jpeg *.png *.tif *.tiff *.webp *.heic '
+            '*.heif *.avif *.gif *.bmp *.mp4 *.mov *.m4v);;Wszystkie pliki (*)')
         if paths:
             self.add_paths(paths)
 
     def add_folder(self):
-        d = QtWidgets.QFileDialog.getExistingDirectory(self, 'Wybierz folder ze zdjęciami')
+        d = QtWidgets.QFileDialog.getExistingDirectory(
+            self, 'Wybierz folder ze zdjęciami')
         if d:
             self.add_paths([d])
 
@@ -587,10 +979,18 @@ class Window(QtWidgets.QMainWindow):
                 uniq.append(p)
         if not uniq:
             return
+        self.rows = []
+        self._thumbs = {}
+        self.selected = None
+        self.cta.setEnabled(False)
         self.status.setText(f'Sprawdzam {len(uniq)} plików…')
         self.status.setStyleSheet(f'color:{DIM}')
         self.progress.show()
         self.progress.setValue(0)
+        self.stack.setCurrentWidget(self.scroll)
+        skeleton_grid(self.grid, max(2, (self.scroll.viewport().width() or 700)
+                                     // (CARD_W + 16)), 2)
+        self._reset_detail()
         self._start(uniq)
 
     def _start(self, files):
@@ -607,108 +1007,125 @@ class Window(QtWidgets.QMainWindow):
         self.status.setText(f'Sprawdzam… {done}/{total}')
         self.status.setStyleSheet(f'color:{DIM}')
 
-    def _on_done(self, reps):
+    def _on_done(self, reps, thumbs):
         self.progress.hide()
-        self.status.setText('')
         self._worker = None
         if self._thread:
             self._thread.quit()
             self._thread = None
-        self._fill(reps)
+        self._fill(reps, thumbs)
 
     # ── render ────────────────────────────────────────────────────────────────
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        # liczba kolumn zalezy od szerokosci okna wiec musi sie przeliczyc
-        QtCore.QTimer.singleShot(60, self._recols)
+        # UWAGA: resize → przelicz kolumny → render → zmiana rozmiaru layoutu →
+        # resize → … To byla petla, ktora wieszala aplikacje i przesuwala karty.
+        w = self.width()
+        if abs(w - self._last_w) < 80 or self._recol_busy or not self.rows:
+            return
+        self._last_w = w
+        self._recol_busy = True
+        QtCore.QTimer.singleShot(120, self._recols)
 
     def _recols(self):
-        if self.rows:
+        try:
             sel = self.selected
             self._render()
             if sel:
-                QtCore.QTimer.singleShot(40, lambda: self.show_detail(sel, keep_name=True))
+                QtCore.QTimer.singleShot(30,
+                                         lambda: self.show_detail(sel, True))
+        finally:
+            self._recol_busy = False
 
-    def _fill(self, reps):
-        while self.grid.count():
-            it = self.grid.takeAt(0)
-            if it.widget():
-                it.widget().deleteLater()
-        self.rows = [(r, mdl.score(r)) for r in reps]
+    def _fill(self, reps, thumbs=None):
+        self._thumbs = {}
+        for r, t in zip(reps, thumbs or []):
+            if isinstance(t, tuple) and len(t) == 3:
+                self._thumbs[r.path] = pixels_to_pixmap(*t)
+        # Porzadek: najgorliwsze pliki na gorze (progressive disclosure).
+        scored = [(r, mdl.score(r)) for r in reps]
+        scored.sort(key=lambda x: (-(x[1]['risk'] if x[1] else -1),
+                                   -len(x[0].findings), x[0].path))
+        self.rows = scored
         self._render()
+        if self.rows:
+            worst = self.rows[0][0]
+            self.show_detail(worst)
+            card = self._cards.get(worst.path)
+            if card:
+                card.mark_selected(True)
+        else:
+            self.status.setText('')
+            self.stack.setCurrentWidget(self.drop)
 
     def _render(self):
         while self.grid.count():
             it = self.grid.takeAt(0)
             if it.widget():
                 it.widget().deleteLater()
+        self._cards = {}
         rows = self.rows
+        if not rows:
+            self.title.setText('Zobacz, co Twoje zdjęcia zdradzają')
+            self.title.setStyleSheet(f'color:{FG}')
+            self.subtitle.setText('Paswywnie i offline. Oryginały zostają tam, '
+                                  'gdzie są.')
+            for k in self.stat_vals:
+                self._set_stat(k, 0)
+            self.cta.setEnabled(False)
+            self.count.setText('')
+            self.stack.setCurrentWidget(self.drop)
+            return
+
         dirty = [x for x in rows if x[0].findings]
         high = [x for x in rows if any(f.risk == 'HIGH' for f in x[0].findings)]
         clean = len(rows) - len(dirty)
         risks = [s['risk'] for _, s in rows if s]
         top = max(risks) if risks else 0
 
-        if not rows:
-            self.headline.setText('Upuść pliki, żeby zobaczyć co ujawniają')
-            self.subline.setText('Paswywnie. Zero sieci, zero konta. '
-                                 'Oryginały zostają tam, gdzie są.')
-            self._set_stat('files', 0, 'plików')
-            self._set_stat('dirty', 0, 'z danymi')
-            self._set_stat('high', 0, 'pilne')
-            self._set_stat('clean', 0, 'czyste')
-            self._set_stat('risk', 0, 'ryzyko /100')
-            self.stack.setCurrentWidget(self.drop)
-            self.cta.setEnabled(False)
-            self._reset_detail()
-            return
-
         self.stack.setCurrentWidget(self.scroll)
         if dirty:
-            self.headline.setText(f'{len(dirty)} plików ujawnia dane')
-            self.headline.setStyleSheet(f'color:{FG}')
-            self.subline.setText(f'Najgorszy przypadek: {top}/100 ryzyka publikacji. '
-                                 f'Reguły v{self.ruleset} · zero skanowania, zero sieci')
+            self.title.setText(f'{len(dirty)} z {len(rows)} plików ujawnia dane')
+            self.title.setStyleSheet(f'color:{FG}')
+            self.subtitle.setText(
+                f'Najwyższe ryzyko publikacji: {top}/100. Reguły v'
+                f'{self.ruleset} · zero skanowania, zero sieci.')
         else:
-            self.headline.setText('Te pliki są czyste')
-            self.headline.setStyleSheet(f'color:{GRN}')
-            self.subline.setText('Nic do usuwania.')
-        self._set_stat('files', len(rows), 'plików')
-        self._set_stat('dirty', len(dirty), 'z danymi')
-        self._set_stat('high', len(high), 'pilne')
-        self._set_stat('clean', clean, 'czyste')
-        self._set_stat('risk', top, 'ryzyko /100')
+            self.title.setText('Te pliki są czyste')
+            self.title.setStyleSheet(f'color:{GRN}')
+            self.subtitle.setText('Nic do usuwania — możesz je wrzucać na '
+                                  'serwer.')
+        self._set_stat('files', len(rows))
+        self._set_stat('dirty', len(dirty))
+        self._set_stat('high', len(high))
+        self._set_stat('clean', clean)
+        self._set_stat('risk', top)
+        self.count.setText(f'{len(rows)} plików')
+        self.status.setText('')
 
-        vw = self.scroll.viewport().width() or (self.width() - 460)
-        cols = max(2, min(6, int(vw // 252)))
+        vw = self.scroll.viewport().width() or (self.width() - 480)
+        gap = 16
+        # ile kolumn REALNIE sie zmiesci — nie "na oko", tylko dzielenie
+        cols = max(2, min(6, int((vw + gap) // (CARD_W + gap))))
+        self._cols = cols
+        # grid_host dostaje dokladnie tyle szerokosci, ile zajmuja karty +
+        # odstepy. Bez tego ostatnia kolumna wychodziza za viewport i jest
+        # obcinana ("poprzesuwane").
+        self.grid_host.setFixedWidth(cols * CARD_W + (cols - 1) * gap)
         for c in range(cols):
-            self.grid.setColumnStretch(c, 1)
-        for i, (r, s) in enumerate(rows):
-            card = Card(r, self._thumb(r.path), *self._badge(s, r))
-            card.setMinimumWidth(200)
-            card.setMaximumWidth(320)
-            card.clicked.connect(self.show_detail)
-            card.entered.connect(self._hover)
-            self.grid.addWidget(card, i // cols, i % cols, QtCore.Qt.AlignTop)
-        self.cta.setEnabled(bool(dirty))
-        if self.selected is None and rows:
-            self.show_detail(rows[0][0])
+            self.grid.setColumnStretch(c, 0)
+            self.grid.setColumnMinimumWidth(c, 0)
 
-    def _thumb(self, path):
-        from PIL import Image
-        try:
-            im = Image.open(path)
-            im.draft('RGB', (400, 240))
-            im = im.convert('RGB')
-            im.thumbnail((250, 150))
-            data = im.tobytes('raw', 'RGB')
-            qim = QtGui.QImage(data, im.width, im.height, im.width * 3,
-                               QtGui.QImage.Format_RGB888)
-            return QtGui.QPixmap.fromImage(qim.scaled(
-                250, 150, QtCore.Qt.KeepAspectRatio,
-                QtCore.Qt.SmoothTransformation))
-        except Exception:
-            return None
+        worst_path = rows[0][0].path if rows[0][0].findings else None
+        for i, (r, s) in enumerate(rows):
+            card = Card(r, self._thumbs.get(r.path), *self._badge(s, r),
+                        worst=(r.path == worst_path))
+            card.setFixedWidth(CARD_W)
+            card.clicked.connect(self.show_detail)
+            card.clean_one.connect(self._clean_one)
+            self.grid.addWidget(card, i // cols, i % cols)
+            self._cards[r.path] = card
+        self.cta.setEnabled(bool(dirty))
 
     def _badge(self, s, rep=None):
         if rep is not None and rep.note:
@@ -719,39 +1136,87 @@ class Window(QtWidgets.QMainWindow):
                  'lokalizacja': 'LOKALIZACJA', 'tozsamosc': 'TOŻSAMOŚĆ'}
         return short.get(s['class'], s['class']), s['risk']
 
-    def _hover(self, rep):
-        if rep is not self.selected:
-            self.show_detail(rep, keep_name=True)
-
     def show_detail(self, rep, keep_name=False):
+        prev = self._cards.get(self.selected.path) if self.selected else None
+        if prev:
+            prev.mark_selected(False)
         self.selected = rep
+        card = self._cards.get(rep.path)
+        if card:
+            card.mark_selected(True)
+
         s = mdl.score(rep)
-        if not keep_name:
-            self.file_name.setText(os.path.basename(rep.path))
+        self.file_name.setText(os.path.basename(rep.path))
+        self.file_meta.setText(
+            f'{human(os.path.getsize(rep.path))} · {os.path.dirname(rep.path)}')
         if not rep.findings:
-            self.detail.setHtml(f'<span style="color:{GRN}">Czyste. Nic do usuwania.</span>')
+            self.detail.setHtml(
+                f'<p style="color:{GRN}">Czyste. Nic do usuwania.</p>')
             return
+
         head = ''
         if s:
-            head = (f'<div style="color:{AMB};font-size:15px;font-weight:700;margin:10px 0 2px">'
-                    f'RYZYKO {s["risk"]}/100</div>'
-                    f'<div style="color:{DIM}">{s["class"]} · pewność '
-                    f'{s["confidence"] * 100:.0f}%</div>')
-        parts = [head, '<hr style="color:#243044">']
-        for f in rep.findings:
-            col = RED if f.risk == 'HIGH' else (AMB if f.risk == 'MED' else DIM)
+            head = (f'<p style="color:{AMB};font-size:20px;font-weight:600;'
+                    f'margin:0 0 2px 0">RYZYKO {s["risk"]}/100</p>'
+                    f'<p style="color:{DIM};margin:0">{s["class"]} · '
+                    f'pewność {s["confidence"] * 100:.0f}%</p>')
+        parts = [head]
+        for cat, items in findings_groups(rep):
+            col = {'lokalizacja': RED, 'tozsamosc': RED, 'sprzet': AMB,
+                   'czas': DIM, 'tekst': DIM}.get(cat, DIM)
             parts.append(
-                f'<div style="margin-top:12px"><span style="color:{col};font-weight:700;'
-                f'letter-spacing:1px">{f.risk}</span> '
-                f'<span style="color:{FG};font-weight:600">{f.kind}</span></div>'
-                f'<div style="color:{FG}">{f.value}</div>'
-                + (f'<div style="color:{DIM};margin-top:2px">→ {f.why}</div>' if f.why else ''))
+                f'<p style="color:{col};font-size:12px;font-weight:500;'
+                f'margin:16px 0 4px 0">{cat.upper()}</p>')
+            for f in items:
+                fc = RED if f.risk == 'HIGH' else (AMB if f.risk == 'MED'
+                                                    else DIM)
+                parts.append(
+                    f'<p style="margin:0"><span style="color:{fc};'
+                    f'font-weight:500">{f.kind}</span> '
+                    f'<span style="color:{FG}">{f.value}</span>'
+                    + (f'<br><span style="color:{FAINT}">{f.why}</span>'
+                       if f.why else '') + '</p>')
         if rep.note:
-            parts.append(f'<div style="color:{DIM};margin-top:14px">({rep.note})</div>')
+            parts.append(f'<p style="color:{FAINT};margin-top:16px">'
+                         f'({rep.note})</p>')
         self.detail.setHtml(''.join(parts))
         self.detail.verticalScrollBar().setValue(0)
 
     # ── czyszczenie ───────────────────────────────────────────────────────────
+    def _clean_one(self, rep):
+        """Czysci pojedynczy plik (menu kontekstowe karty).
+
+        Zgodnie z Microsoft commanding-basics: bez dialogu potwierdzenia,
+        bo operacja jest odwracalna — oryginal zostaje, powstaje kopia.
+        """
+        if not rep.findings:
+            return
+        src = os.path.dirname(rep.path)
+        out = os.path.join(os.path.dirname(src), 'photoscrub-wyczyszczone')
+        try:
+            os.makedirs(out, exist_ok=True)
+        except OSError as e:
+            self.toast.show_toast('Nie udalo sie utworzyc folderu', str(e),
+                                  'err', 6000)
+            return
+        try:
+            before = rep.size
+            dst = ps.safe_dst(rep.path, out)
+            ps.scrub_image(rep.path, dst)
+            freed = max(0, before - os.path.getsize(dst))
+        except Exception as e:
+            self.toast.show_toast('Nie udalo sie wyczyscic pliku',
+                                  f'{os.path.basename(rep.path)}: {e}',
+                                  'err', 7000)
+            return
+        self.toast.show_toast(
+            'Gotowe',
+            f'Czysta kopia w:\n{dst}\nOryginal nietknięty, '
+            f'oszczędność {human(freed)} metadanych.', 'ok', 7000)
+        card = self._cards.get(rep.path)
+        if card:
+            card.setEnabled(False)
+
     def clean(self):
         dirty = [r for r, _ in self.rows if r.findings]
         if not dirty:
@@ -771,11 +1236,12 @@ class Window(QtWidgets.QMainWindow):
                 self, 'Zapisz czyste kopie TUTAJ (inny folder niż zdjęcia)')
             if not default:
                 return
-        if os.path.realpath(default) in {os.path.realpath(os.path.dirname(r.path))
-                                          for r in dirty}:
-            self.toast.show_toast('Zatrzymane',
-                                  'To jest ten sam folder ze zdjęciami. Wybierz inny — '
-                                  'oryginały nigdy nie są nadpisywane.', 'err', 7000)
+        if os.path.realpath(default) in {
+                os.path.realpath(os.path.dirname(r.path)) for r in dirty}:
+            self.toast.show_toast(
+                'Zatrzymane',
+                'To jest ten sam folder ze zdjęciami. Wybierz inny — oryginały '
+                'nigdy nie są nadpisywane.', 'err', 7000)
             return
         self.cta.setEnabled(False)
         self.status.setText('Usuwam…')
@@ -783,28 +1249,27 @@ class Window(QtWidgets.QMainWindow):
         CleanWorker(dirty, default, self.ruleset, self).run()
 
     def _cleaned(self, done, failed, out, freed):
-        self.headline.setText('Gotowe')
-        self.headline.setStyleSheet(f'color:{GRN}')
-        self.subline.setText(f'Kopie w: {out} — oryginały nietknięte, '
-                             f'oszczędność {human(freed)} metadanych')
-        self.status.setText(f'{done} plików bez metadanych')
-        self.status.setStyleSheet(f'color:{GRN}')
         self.rows = []
         self.selected = None
         self._render()
         self._reset_detail()
-        self.subline.setText(f'Kopie w: {out} — oryginały nietknięte, '
-                             f'oszczędność {human(freed)} metadanych')
+        self.title.setText('Gotowe')
+        self.title.setStyleSheet(f'color:{GRN}')
+        self.subtitle.setText(f'Kopie w {out} — oryginały nietknięte, '
+                              f'z metadanych zniknęło {human(freed)}.')
+        self.status.setText(f'{done} plików bez metadanych')
+        self.status.setStyleSheet(f'color:{GRN}')
         if failed:
             self.toast.show_toast(f'{done} oczyszczone, {len(failed)} pominięte',
                                   '\n'.join(failed[:4]), 'warn', 8000)
         else:
-            self.toast.show_toast('Gotowe', f'{done} plików zapisanych w:\n{out}', 'ok')
+            self.toast.show_toast('Gotowe',
+                                  f'{done} plików zapisanych w:\n{out}', 'ok')
 
 
 class ScanWorker(QtCore.QObject):
     progress = QtCore.Signal(int, int)
-    finished = QtCore.Signal(list)
+    finished = QtCore.Signal(list, list)
 
     def __init__(self, files, ruleset):
         super().__init__()
@@ -812,9 +1277,15 @@ class ScanWorker(QtCore.QObject):
         self.ruleset = ruleset
 
     def run(self):
+        # Miniatury robimy TUTAJ, nie w watku GUI: dekodowanie 20 zdjec na
+        # watku interfejsu zamraza okno na sekundy i wyglada jak zawieszenie.
         reps = ps.scan_many(self.files, self.ruleset, workers=8,
                             progress=lambda d, t: self.progress.emit(d, t))
-        self.finished.emit(reps)
+        thumbs = []
+        for r in reps:
+            thumbs.append(thumb_pixels(r.path))
+            self.progress.emit(len(thumbs), len(reps))
+        self.finished.emit(reps, thumbs)
 
 
 class CleanWorker(QtCore.QThread):
@@ -856,3 +1327,15 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+# QSS trzymane jako szablon, zeby nie powtarzac tokenow w 60 miejscach.
+QSS = QSS.format(
+    bg=BG, fg=FG, fg2=FG2, muted=DIM, faint=FAINT,
+    panel=PANEL, panel2=PANEL2, panel3=PANEL3, popover=T.POPOVER,
+    line=LINE, line_strong=T.BORDER_STRONG, ring=T.RING,
+    accent=ACC, accent_hi=T.ACCENT_HOVER, accent_fg=T.ACCENT_FG,
+    accent_soft=T.ACCENT_SOFT,
+    danger=RED, danger_soft=T.DANGER_SOFT, danger_line=T.DANGER_LINE,
+    r1=T.RADIUS['1'], r_sm=T.RADIUS_SM, r_md=T.RADIUS_MD, r_lg=T.RADIUS_LG,
+    r_xl=T.RADIUS_XL, r_2xl=T.RADIUS_2XL, r_full=T.RADIUS['full'],
+)
