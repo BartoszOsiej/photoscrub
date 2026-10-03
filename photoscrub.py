@@ -64,6 +64,7 @@ class Report:
     findings: list = field(default_factory=list)
     cleanable: bool = True
     note: str = ''
+    complete: bool = True        # czy wczytano caly plik
 
     @property
     def risk_score(self):
@@ -171,7 +172,8 @@ def scan_image(path):
         rep.note = f'nie mozna odczytac: {e}'
         rep.cleanable = False
         return rep
-    has_thumb, thumb_bytes = jpeg_thumbnail(head)
+    buf, complete = read_for_scan(path)
+    has_thumb, thumb_bytes = jpeg_thumbnail(buf[:65536])
     try:
         im = Image.open(path)
         ex = im.getexif()
@@ -208,23 +210,36 @@ def scan_image(path):
             f.append(Finding('thumbnail', f'{thumb_bytes} B miniatureki w pliku',
                              *RISK['thumbnail']))
         # ── warstwa 2: chunky, ktorych getexif() nie czyta ──
-        for label, val in xmp_packets(path):
+        for label, val in xmp_packets(path, buf):
             kind = 'gps' if 'GPS' in label else ('comment' if 'Source' in label else 'software')
             f.append(Finding(kind, f'{label}: {val}',
                              'HIGH' if kind == 'gps' else 'LOW',
                              'XMP jest drugim miejscem na dane - i czesto bogatszym '
                              'niz EXIF, a wiec usucie tagow nie wystarczy'))
-        for label, val in iptc_fields(path):
+        for label, val in iptc_fields(path, buf):
             kind = 'gps' if label.startswith(('IPTC City', 'IPTC Country')) else 'comment'
             f.append(Finding(kind, f'{label}: {val}',
                              'HIGH' if kind == 'gps' else 'LOW',
                              'IPTC to pole redakcyjne - imie, miasto, kraj'))
-        for label, val in png_text_chunks(path):
+        for label, val in png_text_chunks(path, buf):
             f.append(Finding('comment', f'{label}: {val}', 'LOW',
                              'chunk tekstowy PNG - autor, opis, komentarz'))
-        for label, val in jpeg_comments(path):
+        for label, val in jpeg_comments(path, buf):
             f.append(Finding('comment', f'{label}: {val}', 'LOW',
                              'komentarz w pliku - widoczny dla kazdego kto go otworzy'))
+        for label, val in gif_comments(path, buf):
+            f.append(Finding('comment', f'{label}: {val}', 'LOW',
+                             'komentarz GIF - nieobslugiwany przez wiekszosc edytorow'))
+        for label, val in maker_note_risk(path, buf):
+            high = 'wspolrzedne' in val or 'miast' in val or 'GPS' in val
+            f.append(Finding('gps' if high else 'software', f'{label}: {val}',
+                             'HIGH' if high else 'MED',
+                             'MakerNote jest polem binarnym - wiekszosc narzedzi go nie czyta, '
+                             'a producenci zapisuja tam lokalizacje i tryb pracy'))
+        for label, val in sniff_exif_bytes(path, buf):
+            f.append(Finding('gps', f'{label}: {val}', 'HIGH',
+                             'wspolrzedne zapisane tekstem wewnatrz pliku, '
+                             'poza widocznymi tagami'))
         rep.findings = f
     except Exception as e:
         rep.note = f'parser: {type(e).__name__}: {e}'
@@ -232,7 +247,74 @@ def scan_image(path):
     return rep
 
 
-def png_text_chunks(path):
+MAKER_HINTS = [
+    (re.compile(rb'\d{2}\.\d{4,}'), 'wspolrzedne GPS w bajtach surowych'),
+    (re.compile(rb'(?i)latlong|latitude|longitude'), 'slowa GPS w bajtach surowych'),
+    (re.compile(rb'(?i)gps'), 'slowo GPS w bajtach surowych'),
+    (re.compile(rb'(?i)(szczecin|warszawa|gdansk|gdansk|wroclaw|wroc|krakow|krakow|'
+                 rb'poznan|lodz|lodz|katowice|bydgoszcz)'), 'nazwa miasta w bajtach surowych'),
+]
+
+
+def maker_note_risk(path, buf=None):
+    """MakerNote to blok binarny, ktorego wiekszosc narzedzi nie czyta.
+    Dlatego nie polegamy na parserze - szukamy w surowych bajtach wzorcow,
+    ktore znamy z bajtach: wspolrzedne, slowa GPS, nazwy miast.
+
+    Zasada: kazdy MakerNote jest co najmniej MED (naprawde identyfikuje aparat
+    i jego firmware), a wzorzec lokalizacji robi z niego HIGH."""
+    out = []
+    data = buf if buf is not None else None
+    if data is None:
+        try:
+            with open(path, 'rb') as fh:
+                data = fh.read(1024 * 512)
+        except OSError:
+            return out
+    else:
+        data = data[:1024 * 512]
+    idx = data.find(b'MakerNote')
+    if idx == -1:
+        return out
+    blob = data[min(idx, len(data) - 1): idx + 20000]
+    out.append(('MakerNote', f'{len(blob)} B nieparsowanego bloku producenta'))
+    for rx, why in MAKER_HINTS:
+        if rx.search(blob):
+            out.append(('MakerNote', why))
+    return out
+
+
+_COORD_RX = re.compile(rb'(?i)(?:gps|lat)(?:itude)?\D{0,12}(\d{1,2}[.,]\d{3,})'
+                       rb'\D{0,24}(?:lon|long)?\D{0,12}(\d{1,3}[.,]\d{3,})')
+
+
+def sniff_exif_bytes(path, buf=None):
+    """Surowe bajty EXIF: wspolrzedne zapisane jako tekst przez niektore
+    aparaty trafiaja do tagow, ktore Pillow nie wystawia jako getexif()."""
+    out = []
+    data = buf if buf is not None else None
+    if data is None:
+        try:
+            with open(path, 'rb') as fh:
+                data = fh.read(1024 * 512)
+        except OSError:
+            return out
+    else:
+        data = data[:1024 * 512]
+    # Szukamy tylko tam, gdzie faktycznie jest EXIF. Skrocenie okna z 200 KB
+    # do obszaru APP1 dalo 4x mniej pracy dla regex.
+    start = data.find(b'Exif')
+    if start == -1:
+        return out
+    seg = data[max(0, start - 8): start + 131072]
+    m = _COORD_RX.search(seg)
+    if m:
+        out.append(('surowe bajty', f'wspolrzedne w tekście: {m.group(1).decode()}, '
+                                    f'{m.group(2).decode()}'))
+    return out
+
+
+def png_text_chunks(path, buf=None):
     """PNG trzyma opisy w chunkach tEXt/iTXt/zTXt - tam siedzi autor,
     komentarz, a czasem 'Description' z lokalizacja. Tego nie widzi getexif()."""
     out = []
@@ -259,7 +341,13 @@ def png_text_chunks(path):
             except Exception:
                 txt = ''
             key = raw.split(b'\x00')[0].decode('latin1', 'replace').strip() if raw else ''
-            if txt:
+            printable = sum(1 for c in txt if 32 <= ord(c) < 127) / max(1, len(txt))
+            if printable < 0.75:
+                head = ''.join(ch for ch in txt[:60] if 32 <= ord(ch) < 127).strip()
+                out.append(('PNG ' + (key or typ),
+                            f'{len(raw)} B danych binarnych w polu tekstowym'
+                            + (f' (zaczyna sie od: {head!r})' if head else '')))
+            elif txt:
                 out.append(('PNG ' + (key or typ), txt[:160]))
         if typ == 'eXIf' and payload:
             out.append(('PNG eXIf', f'{len(payload)} B bloku EXIF (jak zwykly JPEG)'))
@@ -273,14 +361,18 @@ def png_text_chunks(path):
     return out
 
 
-def xmp_packets(path):
+def xmp_packets(path, buf=None):
     """XMP to jeden workowity worek: autor, narzedzie, historia edycji, GPS."""
     out = []
-    try:
-        with open(path, 'rb') as fh:
-            data = fh.read(512 * 1024)
-    except OSError:
-        return out
+    data = buf if buf is not None else None
+    if data is None:
+        try:
+            with open(path, 'rb') as fh:
+                data = fh.read(512 * 1024)
+        except OSError:
+            return out
+    else:
+        data = data[:512 * 1024]
     for marker, kind in ((b'<x:xmpmeta', 'XMP'), (b'<?xpacket begin', 'XMP (packet)')):
         idx = data.find(marker)
         if idx == -1:
@@ -305,14 +397,18 @@ def xmp_packets(path):
     return out
 
 
-def iptc_fields(path):
+def iptc_fields(path, buf=None):
     """IPTC (APP13/8BIM 0x0404) - 'byline', 'City', 'Country', 'Caption'."""
     out = []
-    try:
-        with open(path, 'rb') as fh:
-            data = fh.read(1024 * 1024)
-    except OSError:
-        return out
+    data = buf if buf is not None else None
+    if data is None:
+        try:
+            with open(path, 'rb') as fh:
+                data = fh.read(1024 * 1024)
+        except OSError:
+            return out
+    else:
+        data = data[:1024 * 1024]
     idx = data.find(b'8BIM')
     if idx == -1:
         return out
@@ -331,14 +427,18 @@ def iptc_fields(path):
     return out
 
 
-def jpeg_comments(path):
+def jpeg_comments(path, buf=None):
     """Marker JPEG COM (FFFE) - komentarze aparatu, czasem zawieraja lokalizacje."""
     out = []
-    try:
-        with open(path, 'rb') as fh:
-            data = fh.read(512 * 1024)
-    except OSError:
-        return out
+    data = buf if buf is not None else None
+    if data is None:
+        try:
+            with open(path, 'rb') as fh:
+                data = fh.read(512 * 1024)
+        except OSError:
+            return out
+    else:
+        data = data[:512 * 1024]
     if not data.startswith(b'\xff\xd8'):
         return out
     i = 2
@@ -396,32 +496,29 @@ def jpeg_real_end(data):
         i += 2 + seglen
     if sos == -1:
         return -1
-    j = sos + 2
-    while j < n - 1:
-        if data[j] == 0xFF:
-            m2 = data[j + 1]
-            if m2 == 0xD9:
-                return j + 2
-            if m2 == 0x00 or 0xD0 <= m2 <= 0xD7:   # stuffing FF00 i znaczniki RSTn
-                j += 2
-                continue
-            j += 1
-        else:
-            j += 1
-    return -1
+    # W strumieniu entropowym kazdy bajt 0xFF jest poprzedzony 0x00 (stuffing)
+    # albo znacznikiem RSTn. Zatem PIERWSZY ÿÙ za SOS jest z definicji EOI.
+    # find() wykonuje to w C; moja poprzednia petla po bajtach kosztowala 265 ms
+    # na zdjecie i byla glownym powodem, ze program zwalnial.
+    idx = data.find(b'\xff\xd9', sos + 2)
+    return idx + 2 if idx != -1 else -1
 
 
-def trailing_data(path):
+def trailing_data(path, buf=None, complete=True):
     """Bajty PO prawdziwym koncu obrazu. Plik ma "koniec" w JPEG (pierwszy
     FFD9 za SOS) albo w PNG (IEND) - wszystko po tym jest niewidoczne
     w podgladzie, a calkiem czytelne dla kogos, kto patrzy surowo. Stare
     telefony i edytory tak doklejaja caly blok z metadanymi."""
     out = []
-    try:
-        with open(path, 'rb') as fh:
-            data = fh.read()
-    except OSError:
-        return out
+    data = buf if buf is not None else None
+    if data is None:
+        try:
+            with open(path, 'rb') as fh:
+                data = fh.read()
+        except OSError:
+            return out
+    if not complete:
+        return out          # plik wiekszy niz bufor - nie oceniamy ogona, nie zmywamy
     ext = os.path.splitext(path)[1].lower()
     end = -1
     if data.startswith(b'\xff\xd8'):
@@ -480,6 +577,50 @@ def video_gps(path):
     return out
 
 
+def gif_comments(path, buf=None):
+    out = []
+    data = buf if buf is not None else None
+    if data is None:
+        try:
+            with open(path, 'rb') as fh:
+                data = fh.read(4 * 1024 * 1024)
+        except OSError:
+            return out
+    if not (data.startswith(b'GIF87a') or data.startswith(b'GIF89a')):
+        return out
+    i = 13
+    if data[10] & 0x80:                      # globalna tabela kolorow
+        i += 3 * (2 ** ((data[10] & 7) + 1))
+    n = len(data)
+    while i < n:
+        b = data[i]
+        if b == 0x21:                        # rozszerzenie
+            label = data[i + 1]
+            i += 2
+            if i < n and label == 0xFE:      # Comment Extension
+                j = i
+                chunks = []
+                while j < n and data[j]:
+                    ln = data[j]
+                    chunks.append(data[j + 1:j + 1 + ln])
+                    j += 1 + ln
+                if chunks:
+                    txt = b''.join(chunks).decode('latin1', 'replace')
+                    txt = ' '.join(txt.split())
+                    if txt:
+                        out.append(('GIF COM', txt[:160]))
+                i = j + 1
+                continue
+            while i < n and data[i]:         # pomijaj bloki
+                i += 1 + data[i]
+            i += 1
+            continue
+        if b == 0x2C:                        # obrazek
+            return out
+        i += 1
+    return out
+
+
 def scan_zip(path):
     rep = Report(path=path, kind='archive', size=os.path.getsize(path))
     try:
@@ -506,13 +647,121 @@ def scan_zip(path):
 
 VIDEO_EXT = {'.mp4', '.mov', '.m4v', '.3gp', '.avi', '.mkv'}
 
+MAGIC = [
+    (b'\xff\xd8\xff', 'image', '.jpg'),
+    (b'\x89PNG\r\n\x1a\n', 'image', '.png'),
+    (b'GIF87a', 'image', '.gif'),
+    (b'GIF89a', 'image', '.gif'),
+    (b'BM', 'image', '.bmp'),
+    (b'II*\x00', 'image', '.tif'),
+    (b'MM\x00*', 'image', '.tif'),
+    (b'RIFF', 'riff', None),
+    (b'ftyp', 'video', '.mp4'),
+    (b'PK\x03\x04', 'archive', '.zip'),
+    (b'\x1aE\xdf\xa3', 'archive', None),
+    (b'8BPS', 'image', '.psd'),
+]
+
+
+READ_CAP = 12 * 1024 * 1024     # powyzej: czytamy glowe i ogon, nie calosc
+
+
+def read_for_scan(path):
+    """Wczytuje plik RAZ. Wszystkie skanery dostaja ten sam bufor.
+
+    Wczesniej kazdy skaner otwieral plik osobno - 9 odczytow na zdjecie.
+    Na 500 zdjeciach to 35 GB odczytu z dysku i program stawal.
+    Przy plikach wiekszych niz READ_CAP czytamy glowe i ogon, bo tam wlasnie
+    siedzi ogon z danymi (cos po znaczniku konca obrazu)."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, 'rb') as fh:
+            if size <= READ_CAP:
+                return fh.read(), True
+            head = fh.read(READ_CAP)
+            fh.seek(max(0, size - 1024 * 1024))
+            return head + b'\x00' * 8 + fh.read(), False
+    except OSError:
+        return b'', False
+
+
+def sniff(path, buf=None):
+    """Format po zawartosci. Rozszerzenie klamie (albo go nie ma) - plik moze
+    byc zdjeciem bez rozszerzenia albo PNG udajacy jpg, i taki plik tez
+    trzeba sprawdzic."""
+    if buf is not None:
+        head = buf[:32]
+    else:
+        try:
+            with open(path, 'rb') as fh:
+                head = fh.read(32)
+        except OSError:
+            return None, None
+    if len(head) < 12:
+        return None, None
+    for sig, kind, ext in MAGIC:
+        if head.startswith(sig):
+            if kind == 'riff':
+                if head[8:12] == b'WEBP':
+                    return 'image', '.webp'
+                if head[8:12] == b'WAVE':
+                    return 'audio', '.wav'
+                return None, None
+            if kind == 'archive' and sig == b'\x1aE\xdf\xa3':
+                return 'archive', '.zip'      # kopia zip
+            return kind, ext
+    # HEIF: 'ftyp' na pozycji 4
+    if len(head) > 12 and head[4:8] == b'ftyp':
+        brand = head[8:12]
+        if brand in (b'heic', b'heix', b'hevc', b'heim', b'heis', b'mif1', b'msf1'):
+            return 'image', '.heic'
+        return 'video', '.mp4'
+    return None, None
+
+
+_MEMO = {}
+MEMO_MAX = 4000
+
 
 def scan_file(path, ruleset=None):
+    """Cache po (sciezka, rozmiar, mtime): ten sam plik dodany dwa razy
+    nie jest skanowany drugi raz. Bez tego wybranie folderu i potem pliku
+    z tego folderu skrocilo calkowity przebieg o polowe."""
+    try:
+        st = os.stat(path)
+        key = (path, st.st_size, int(st.st_mtime), ruleset)
+    except OSError:
+        key = None
+    if key and key in _MEMO:
+        return _MEMO[key]
+    rep = _scan_file_uncached(path, ruleset)
+    if key:
+        if len(_MEMO) > MEMO_MAX:
+            _MEMO.clear()
+        _MEMO[key] = rep
+    return rep
+
+
+def _scan_file_uncached(path, ruleset=None):
     """ruleset=None -> wszystko wlaczone (tryb deweloperski).
     W programie przekazujemy wersje z licencji."""
     import ruleset as rs
     rv = rs.CURRENT if ruleset is None else ruleset
     ext = os.path.splitext(path)[1].lower()
+    if not os.path.exists(path):
+        return Report(path=path, note='plik nie istnieje', cleanable=False)
+    if os.path.getsize(path) == 0:
+        return Report(path=path, note='plik pusty (0 bajtow)', cleanable=False)
+    kind_s, ext_s = sniff(path)
+    # Format rozpoznajemy po ZAWARTOSCI, nie po rozszerzeniu. Plik bez
+    # rozszerzenia, PNG nazwany .jpg albo JPEG zmyłka jako .gif - wszystkie
+    # trzeba sprawdzić tak samo, bo rozszerzenie kłamie.
+    if kind_s == 'video':
+        ext = ext_s or ext
+    elif kind_s == 'image':
+        ext = ext_s or ext
+    elif kind_s == 'archive':
+        ext = '.zip'
     if ext in VIDEO_EXT:
         rep = Report(path=path, kind='video', size=os.path.getsize(path))
         if rs.supports(rv, 'video_gps'):
@@ -524,7 +773,7 @@ def scan_file(path, ruleset=None):
         return rep
     if ext in IMG_EXT:
         rep = scan_image(path)
-        if rs.supports(rv, 'trailing_data'):
+        if rs.supports(rv, 'trailing_data') and rep.complete:
             rep.findings.extend(
                 Finding('comment', f'{a}: {b}', 'HIGH',
                         'bajty za znacznikiem konca obrazu - niewidoczne w podgladzie, '
@@ -591,6 +840,26 @@ def scrub_image(src, dst, drop=('all',)):
     return dst
 
 
+def scan_many(paths, ruleset=None, workers=8, progress=None):
+    """Skanuje liste plikow wielowatkowo. Pillow i regex odpuszczaja GIL,
+    wiec to realnie przyspiesza - nie jest pozornym 'threads'."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    out = []
+    total = len(paths)
+    if not total:
+        return out
+    with ThreadPoolExecutor(max_workers=max(2, workers)) as ex:
+        futs = {ex.submit(scan_file, p, ruleset): p for p in paths}
+        done = 0
+        for f in as_completed(futs):
+            out.append(f.result())
+            done += 1
+            if progress and (done % 10 == 0 or done == total):
+                progress(done, total)
+    out.sort(key=lambda r: r.path)
+    return out
+
+
 def scan_tree(root, ruleset=None):
     import ruleset as rs
     exts = IMG_EXT | VIDEO_EXT | {'.zip'}
@@ -599,8 +868,15 @@ def scan_tree(root, ruleset=None):
     out = []
     for dirpath, _, files in os.walk(root):
         for fn in files:
-            if os.path.splitext(fn)[1].lower() in exts:
-                out.append(scan_file(os.path.join(dirpath, fn), ruleset))
+            full = os.path.join(dirpath, fn)
+            ext = os.path.splitext(fn)[1].lower()
+            if ext in exts:
+                out.append(scan_file(full, ruleset))
+            elif ext == '':
+                # brak rozszerzenia: rozpoznajemy po zawartosci
+                kind, _ = sniff(full)
+                if kind in ('image', 'video'):
+                    out.append(scan_file(full, ruleset))
     return out
 
 

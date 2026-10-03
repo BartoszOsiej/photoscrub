@@ -216,6 +216,11 @@ class App((TkinterDnD.Tk if HAS_DND else tk.Tk)):
         self.risk = tk.Label(inner, text='', bg=BG, fg=DIM, font=BODY_F, anchor='w')
         self.risk.pack(anchor='w', pady=(6, 0))
 
+        self.bar_bg = tk.Frame(self, bg=PANEL_2, height=4)
+        self.bar_bg.pack(fill='x', padx=18)
+        self.bar = tk.Frame(self.bar_bg, bg=ACC, height=4, width=0)
+        self.bar.place(x=0, y=0, relheight=1, width=0)
+
         self.grid_ = tk.Frame(self, bg=BG)
         self.grid_.pack(fill='both', expand=True, padx=18, pady=(12, 12))
         tk.Label(self.grid_, text='Upuść zdjęcia na to okno', bg=BG, fg=DIM,
@@ -291,7 +296,18 @@ class App((TkinterDnD.Tk if HAS_DND else tk.Tk)):
 
     def _work(self, files):
         rv = getattr(self, 'ruleset', rs.CURRENT)
-        reps = [ps.scan_file(f, rv) for f in files]
+        reps = ps.scan_many(files, rv, workers=8, progress=self._progress)
+        self.after(0, self._thumbs, reps)
+
+    def _progress(self, done, total):
+        def upd():
+            self.status.configure(text=f'Sprawdzam… {done}/{total}', fg=DIM)
+            w = self.bar_bg.winfo_width()
+            if w > 0:
+                self.bar.configure(width=max(1, int(w * done / max(1, total))))
+        self.after(0, upd)
+
+    def _thumbs(self, reps):
         thumbs = [self._thumb(r.path) for r in reps]
         self.after(0, self._fill, reps, thumbs)
 
@@ -308,6 +324,7 @@ class App((TkinterDnD.Tk if HAS_DND else tk.Tk)):
             return ImageTk.PhotoImage(Image.new('RGB', box, PANEL_2))
 
     def _fill(self, reps, thumbs):
+        self.bar.configure(width=0)
         for r, t in zip(reps, thumbs):
             self.rows.append((r, t, mdl.score(r)))
         dirty = [x for x in self.rows if x[0].findings]
