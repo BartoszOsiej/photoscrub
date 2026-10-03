@@ -34,13 +34,13 @@ jobs:
           set -e
           python -m nuitka --onefile --assume-yes-for-downloads \
             --include-package=PIL --include-package=cryptography \
-            --output-filename=photoscrub photoscrub.py
-          ls -la dist/ || true
+            --output-filename=photoscrub --output-dir=build photoscrub.py
+          ls -la build/ || true
       - name: Normalise name and test the binary
         run: |
           set -e
           rm -rf staging && mkdir staging
-          bin="$(find dist -maxdepth 1 -type f -name 'photoscrub*' ! -name '*.build' ! -name '*.dist' ! -name '*.onefile' | head -1)"
+          bin="$(find build -maxdepth 1 -type f -name 'photoscrub*' ! -name '*.build' ! -name '*.dist' ! -name '*.onefile' | head -1)"
           echo "binary: $bin"
           test -n "$bin"
           cp "$bin" staging/photoscrub
@@ -68,12 +68,12 @@ jobs:
           python -c "import model, license, ruleset; print('modules ok')"
       - name: Build CLI with Nuitka
         run: |
-          python -m nuitka --onefile --assume-yes-for-downloads --include-package=PIL --include-package=cryptography --output-filename=photoscrub.exe photoscrub.py
-          dir dist
+          python -m nuitka --onefile --assume-yes-for-downloads --include-package=PIL --include-package=cryptography --output-filename=photoscrub.exe --output-dir=build photoscrub.py
+          Get-ChildItem build || exit 0
       - name: Normalise name and test the exe
         shell: pwsh
         run: |
-          $bin = Get-ChildItem -Path dist -Filter 'photoscrub*' -File |
+          $bin = Get-ChildItem -Path build -Filter 'photoscrub*' -File |
                  Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
           if (-not $bin) { throw "exe not produced" }
           New-Item -ItemType Directory -Force staging | Out-Null
@@ -104,6 +104,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: System packages
+        shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             sudo apt-get update
@@ -119,13 +120,13 @@ jobs:
           python -m nuitka --onefile --assume-yes-for-downloads \
             --include-package=PIL --include-package=cryptography \
             --include-package=tkinterdnd2 --enable-plugin=tk-inter \
-            --output-filename=${{ matrix.out }} gui.py
-          ls -la dist/ || true
+            --output-filename=${{ matrix.out }} --output-dir=build gui.py
+          ls -la build/ || true
       - name: Stage the binary
         shell: pwsh
         run: |
           $want = "${{ matrix.out }}"
-          $bin = Get-ChildItem -Path dist -File |
+          $bin = Get-ChildItem -Path build -File |
                  Where-Object { $_.Name -notmatch '\.(build|dist|onefile)$' -and
                                 ($_.Name -match 'gui|photoscrub') } |
                  Select-Object -First 1
@@ -162,7 +163,7 @@ jobs:
           }
           if (-not $kfh) { throw "makeappx.exe not found" }
           New-Item -ItemType Directory -Force msix_payload | Out-Null
-          $exe = Get-ChildItem -Path dist -Filter 'photoscrub*' -File | Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
+          $exe = Get-ChildItem -Path build -Filter 'photoscrub*' -File | Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
           Copy-Item $exe.FullName msix_payload/photoscrub.exe
           Copy-Item packaging/msix/AppxManifest.xml msix_payload/
           Copy-Item -Recurse packaging/msix/assets msix_payload/assets
