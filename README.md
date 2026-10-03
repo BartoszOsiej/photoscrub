@@ -1,37 +1,67 @@
 # photoscrub
 
-Shows you what your photos leak — then removes it in one click.
+Shows you what your photos leak — then removes it.
 
 Passive, local, no upload, no account. Windows and Linux.
 
 ## What it finds
 
-- **GPS coordinates** (HIGH) — exact position, 6 decimal places
-- **Embedded thumbnail** (HIGH) — a JPEG can carry a second, *complete* copy of
-  the original image as a 160×120 preview. Stripping EXIF does not remove it.
-  This is the one most "metadata removers" get wrong.
-- **Body serial number** (HIGH) — identifies the device, and through purchase
-  history, you
-- **Artist / copyright / software / lens** (MED)
-- **Timestamps** (LOW) — when you took it, and in what order
-- **Zip archives** — `.DS_Store`, `Thumbs.db`, `._name` sidecar files
+| Finding | Level | Why it matters |
+|---|---|---|
+| **GPS coordinates** | HIGH | exact position, 6 decimal places |
+| **Embedded thumbnail** | HIGH | a JPEG can carry a second, *complete* copy of the original image as a 160×120 preview. Stripping EXIF does not remove it |
+| **Body serial number** | HIGH | identifies the device, and through purchase history, you |
+| **XMP: City, Country, GPS** | HIGH | a second place for the same data — cleaning EXIF is not enough |
+| **IPTC: byline, City, Country** | HIGH | editorial fields people forget about |
+| **PNG tEXt / iTXt / zTXt / tIME / eXIf** | MED | author, description, comment, embedded EXIF |
+| **Artist / Copyright / Software / Lens** | MED | who, with what, where |
+| **Data appended after the image** | MED | invisible in preview, readable in a hex editor |
+| **GPS in video (MP4/MOV udta atom)** | HIGH | video has no EXIF tags; location lives in the container |
+| **Addresses, postcodes, phone numbers in free text** | MED | the leak nobody looks for, because it is not a tag |
+| **ZIP: .DS_Store, Thumbs.db, ._sidecars** | LOW | usernames and full paths inside archives |
 
-## Why it exists
+HEIC/HEIF (iPhone) and RAW extensions (DNG, CR2, NEF, ARW, ORF, RW2) are read.
 
-Tools like `exiftool` do this well but are command-line tools. GUI tools look
-like they were written in 2008 and tell you *that* a tag exists, not what it
-means. photoscrub prints the actual value, grades the risk, and explains why
-each field is a problem.
+## Rulesets
+
+Rules are versioned, and your license says which version you bought.
+
+- **v1 — basic**: EXIF, GPS, serial, artist, and the thumbnail hidden in the JPEG.
+- **v2 — full**: everything above plus HEIC, XMP, IPTC, PNG chunks, JPEG comments,
+  data appended after the image, GPS in video, and PII in free text.
+
+A v1 license keeps working on v1 forever. Nothing is taken away. The upgrade exists
+because v2 is real work, not because the file format changed under you.
+
+## The model
+
+A small classifier we trained ourselves (`tools/train_model.py`) scores publish risk
+from 15 features. It is **not** an LLM: it is logistic regression, 1.8 KB, trained on
+8000 synthetic metadata profiles, 97.4% accuracy on held-out data. It runs offline and
+every decision comes from coefficients you can read in `model.json`.
+
+It is also how we found our own bug: it classified a PNG whose description contained
+"Mieszkanie, ul. Rodła 12" as safe. That is why `has_free_text_pii` exists.
 
 ## Use
 
 ```
-photoscrub.py PATH              # report only
-photoscrub.py PATH --scrub OUT  # write metadata-free copies to OUT
-photoscrub.py PATH --json       # machine readable
+photoscrub PATH              # report only
+photoscrub PATH --scrub OUT  # write metadata-free copies to OUT
+photoscrub PATH --json       # machine readable
 ```
 
-Originals are never modified. `--scrub` writes new files.
+Originals are never modified. `--scrub` refuses to write into the source folder.
+
+## License keys
+
+Keys are Ed25519-signed payloads; the signature travels with the key, so activation
+works offline. A key is bound to one machine. Private keys never leave the issuing
+machine (`~/.secrets/photoscrub/`).
+
+```
+python3 tools/issue.py --email you@example.com --name "Buyer" --ruleset 2
+```
 
 ## License
 

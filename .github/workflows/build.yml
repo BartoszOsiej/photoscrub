@@ -23,7 +23,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt nuitka
       - name: Smoke test the engine
         run: |
           python - <<'PY'
@@ -34,12 +34,14 @@ jobs:
           assert r.returncode == 0, r.stderr
           print('engine ok')
           PY
-      - name: Build onefile binary
+      - name: Build onefile binary (Nuitka - brak .pyc do rozpakowania)
         run: |
-          pyinstaller --onefile \
-            --name photoscrub \
-            --hidden-import PIL.Image \
-            --hidden-import PIL.ExifTags \
+          python -m nuitka \
+            --onefile \
+            --assume-yes-for-downloads \
+            --output-filename=photoscrub \
+            --include-package=PIL \
+            --include-package=cryptography \
             photoscrub.py
       - name: Test the binary
         run: |
@@ -65,16 +67,23 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt nuitka
       - name: Smoke test the engine
         shell: pwsh
         run: |
           python photoscrub.py --help
           if ($LASTEXITCODE -ne 0) { throw "engine failed on Windows" }
           "engine ok on windows"
-      - name: Build exe
+      - name: Build exe (Nuitka - brak .pyc do rozpakowania)
         run: |
-          pyinstaller --onefile --name photoscrub.exe photoscrub.py
+          python -m nuitka \
+            --onefile \
+            --assume-yes-for-downloads \
+            --output-filename=photoscrub.exe \
+            --include-package=PIL \
+            --include-package=PIL.Image \
+            --include-package=cryptography \
+            photoscrub.py
       - name: Test the exe
         shell: pwsh
         run: |
@@ -90,6 +99,49 @@ jobs:
           name: photoscrub-windows
           path: dist/
 
+  gui:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            out: dist/photoscrub-gui.exe
+            cmd: powershell
+          - os: ubuntu-latest
+            out: dist/photoscrub-gui
+            cmd: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install (Linux needs tk)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt nuitka
+          if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update && sudo apt-get install -y python3-tk; fi
+      - name: Build GUI with Nuitka
+        run: |
+          python -m nuitka \
+            --onefile \
+            --assume-yes-for-downloads \
+            --output-filename=photoscrub-gui \
+            --include-package=PIL \
+            --include-package=cryptography \
+            --include-package=tkinterdnd2 \
+            --enable-plugin=tk-inter \
+            gui.py
+      - name: Move binary to expected name
+        shell: pwsh
+        run: |
+          if ("${{ runner.os }}" -eq "Windows") { Move-Item -Force dist/gui.exe dist/photoscrub-gui.exe }
+          else { Move-Item -Force dist/gui.bin dist/photoscrub-gui 2>$null; Move-Item -Force dist/gui dist/photoscrub-gui 2>$null }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photoscrub-gui-${{ runner.os }}
+          path: dist/
+
   msix:
     runs-on: windows-latest
     needs: windows
@@ -101,10 +153,17 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
-      - name: Build exe
+          pip install -r requirements.txt nuitka
+      - name: Build exe (Nuitka - brak .pyc do rozpakowania)
         run: |
-          pyinstaller --onefile --name photoscrub.exe photoscrub.py
+          python -m nuitka \
+            --onefile \
+            --assume-yes-for-downloads \
+            --output-filename=photoscrub.exe \
+            --include-package=PIL \
+            --include-package=PIL.Image \
+            --include-package=cryptography \
+            photoscrub.py
       - name: Pack MSIX (unsigned layout)
         shell: pwsh
         run: |
@@ -131,7 +190,7 @@ jobs:
           path: msix_out/
 
   release:
-    needs: [linux, windows]
+    needs: [linux, windows, gui]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
@@ -147,11 +206,20 @@ jobs:
             artifacts/photoscrub-linux/photoscrub-linux.sha256
             artifacts/photoscrub-windows/photoscrub.exe
             artifacts/photoscrub-windows/photoscrub-windows.sha256
+            artifacts/photoscrub-gui-Windows/dist/photoscrub-gui.exe
+            artifacts/photoscrub-gui-Linux/dist/photoscrub-gui
           body: |
             Metadata leak scanner and remover. Local, offline, no account.
 
-            Windows: `photoscrub.exe`
-            Linux: `chmod +x photoscrub && ./photoscrub PATH`
+            GUI  Windows: `photoscrub-gui.exe`
+            GUI  Linux:   `chmod +x photoscrub-gui && ./photoscrub-gui`
+            CLI  Windows: `photoscrub.exe`
+            CLI  Linux:   `chmod +x photoscrub && ./photoscrub PATH`
+
+            Need a license key? Ask, and you get one. Ruleset v1 covers EXIF, GPS,
+            serial and the thumbnail hidden inside the JPEG. Ruleset v2 adds HEIC,
+            XMP, IPTC, PNG chunks, data appended after the image, GPS in video, and
+            addresses in free text.
 
             Verify:
             ```

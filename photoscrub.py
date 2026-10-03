@@ -11,6 +11,7 @@ Zero zaleznosci zewnetrznych poza Pillow. Dziala na Linuksie i Windows.
 """
 import io
 import json
+import re
 import os
 import struct
 import sys
@@ -21,7 +22,16 @@ from PIL import Image, ExifTags, ImageFile
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-IMG_EXT = {'.jpg', '.jpeg', '.png', '.tif', '.tiff', '.webp', '.heic'}
+try:  # zdjecia z iPhone'a (HEIC/HEIF) - bez tego polowa aparatów jest nieczytelna
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+    HAS_HEIF = True
+except Exception:
+    HAS_HEIF = False
+
+IMG_EXT = {'.jpg', '.jpeg', '.jpe', '.png', '.tif', '.tiff', '.webp', '.heic',
+            '.heif', '.avif', '.jfif', '.bmp', '.gif', '.psd', '.dng', '.cr2', '.nef',
+            '.arw', '.orf', '.rw2'}
 VIDEO_EXT = {'.mp4', '.mov', '.m4v', '.avi', '.mkv'}
 
 RISK = {
@@ -197,11 +207,277 @@ def scan_image(path):
         if has_thumb:
             f.append(Finding('thumbnail', f'{thumb_bytes} B miniatureki w pliku',
                              *RISK['thumbnail']))
+        # ── warstwa 2: chunky, ktorych getexif() nie czyta ──
+        for label, val in xmp_packets(path):
+            kind = 'gps' if 'GPS' in label else ('comment' if 'Source' in label else 'software')
+            f.append(Finding(kind, f'{label}: {val}',
+                             'HIGH' if kind == 'gps' else 'LOW',
+                             'XMP jest drugim miejscem na dane - i czesto bogatszym '
+                             'niz EXIF, a wiec usucie tagow nie wystarczy'))
+        for label, val in iptc_fields(path):
+            kind = 'gps' if label.startswith(('IPTC City', 'IPTC Country')) else 'comment'
+            f.append(Finding(kind, f'{label}: {val}',
+                             'HIGH' if kind == 'gps' else 'LOW',
+                             'IPTC to pole redakcyjne - imie, miasto, kraj'))
+        for label, val in png_text_chunks(path):
+            f.append(Finding('comment', f'{label}: {val}', 'LOW',
+                             'chunk tekstowy PNG - autor, opis, komentarz'))
+        for label, val in jpeg_comments(path):
+            f.append(Finding('comment', f'{label}: {val}', 'LOW',
+                             'komentarz w pliku - widoczny dla kazdego kto go otworzy'))
         rep.findings = f
     except Exception as e:
         rep.note = f'parser: {type(e).__name__}: {e}'
         rep.cleanable = False
     return rep
+
+
+def png_text_chunks(path):
+    """PNG trzyma opisy w chunkach tEXt/iTXt/zTXt - tam siedzi autor,
+    komentarz, a czasem 'Description' z lokalizacja. Tego nie widzi getexif()."""
+    out = []
+    try:
+        with open(path, 'rb') as fh:
+            data = fh.read()
+    except OSError:
+        return out
+    if not data.startswith(b'\x89PNG'):
+        return out
+    i = 8
+    n = len(data)
+    while i + 8 <= n:
+        ln = int.from_bytes(data[i:i + 4], 'big')
+        typ = data[i + 4:i + 8].decode('latin1', 'replace')
+        payload = data[i + 8:i + 8 + ln]
+        if typ in ('tEXt', 'iTXt', 'zTXt'):
+            try:
+                raw = payload
+                if typ == 'zTXt':
+                    import zlib
+                    raw = zlib.decompress(payload[1:])
+                txt = raw.replace(b'\x00', b' ').decode('utf-8', 'replace').strip()
+            except Exception:
+                txt = ''
+            key = raw.split(b'\x00')[0].decode('latin1', 'replace').strip() if raw else ''
+            if txt:
+                out.append(('PNG ' + (key or typ), txt[:160]))
+        if typ == 'eXIf' and payload:
+            out.append(('PNG eXIf', f'{len(payload)} B bloku EXIF (jak zwykly JPEG)'))
+        if typ == 'iCCP' and payload:
+            out.append(('PNG iCCP', f'profil ICC {len(payload)} B (nazwa, sRGB/P3/Display P3)'))
+        if typ == 'tIME':
+            out.append(('PNG tIME', 'data i czas modyfikacji w pliku'))
+        if typ == 'IEND':
+            break
+        i += 12 + ln
+    return out
+
+
+def xmp_packets(path):
+    """XMP to jeden workowity worek: autor, narzedzie, historia edycji, GPS."""
+    out = []
+    try:
+        with open(path, 'rb') as fh:
+            data = fh.read(512 * 1024)
+    except OSError:
+        return out
+    for marker, kind in ((b'<x:xmpmeta', 'XMP'), (b'<?xpacket begin', 'XMP (packet)')):
+        idx = data.find(marker)
+        if idx == -1:
+            continue
+        blob = data[idx:idx + 60000]
+        end = blob.find(b'</x:xmpmeta')
+        chunk = blob[:end if end != -1 else 40000].decode('utf-8', 'replace')
+        for tag, label in (('photoshop:City', 'XMP miasto'), ('photoshop:Country', 'XMP kraj'),
+                           ('Iptc4xmpCore:Location', 'XMP lokalizacja'),
+                           ('xmp:CreatorTool', 'XMP narzedzie'),
+                           ('xmp:ModifyDate', 'XMP data modyfikacji'),
+                           ('photoshop:Credit', 'XMP autor/credit'),
+                           ('dc:creator', 'XMP tworca'),
+                           ('crs:Version', 'XMP wersja programu')):
+            if tag in chunk:
+                out.append((label, f'jest w dokumencie ({tag})'))
+        if 'exif:GPS' in chunk or 'GPSLatitude' in chunk:
+            out.append(('XMP GPS', 'wspolrzedne w XMP, nie tylko w EXIF'))
+        if 'photoshop:Instructions' in chunk or 'photoshop:Source' in chunk:
+            out.append(('XMP Source', 'wlasciciel/źródło w XMP'))
+        break
+    return out
+
+
+def iptc_fields(path):
+    """IPTC (APP13/8BIM 0x0404) - 'byline', 'City', 'Country', 'Caption'."""
+    out = []
+    try:
+        with open(path, 'rb') as fh:
+            data = fh.read(1024 * 1024)
+    except OSError:
+        return out
+    idx = data.find(b'8BIM')
+    if idx == -1:
+        return out
+    seg = data[idx:idx + 20000]
+    for tag, label in ((0x0078, 'IPTC byline (autor)'), (0x005A, 'IPTC caption (opis)'),
+                       (0x5A, 'IPTC City'), (0x64, 'IPTC Country'),
+                       (0x05, 'IPTC ObjectName (nazwa pliku)')):
+        m = re.search(bytes([tag]) + b'(.{5,200})', seg, re.S)
+        if m:
+            try:
+                val = m.group(1).split(b'\x00')[0].decode('latin1', 'replace').strip()
+            except Exception:
+                val = ''
+            if val and val.isprintable() and len(val) > 2:
+                out.append((label, val[:120]))
+    return out
+
+
+def jpeg_comments(path):
+    """Marker JPEG COM (FFFE) - komentarze aparatu, czasem zawieraja lokalizacje."""
+    out = []
+    try:
+        with open(path, 'rb') as fh:
+            data = fh.read(512 * 1024)
+    except OSError:
+        return out
+    if not data.startswith(b'\xff\xd8'):
+        return out
+    i = 2
+    while i < len(data) - 4:
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        marker = data[i + 1]
+        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+            i += 2
+            continue
+        if marker == 0xDA:
+            break
+        seglen = int.from_bytes(data[i + 2:i + 4], 'big')
+        if marker == 0xFE:
+            body = data[i + 4:i + 2 + seglen].replace(b'\x00', b' ').decode('latin1', 'replace')
+            body = ' '.join(body.split())
+            if body:
+                out.append(('JPEG COM', body[:160]))
+        i += 2 + seglen
+    return out
+
+
+def jpeg_real_end(data):
+    """Prawdziwy koniec strumienia JPEG.
+
+    Nie wystarczy 'ostatni FFD9 w pliku', bo plik z doklejonym ogonem ma ten
+    znacznik daleko od konca. Idziemy po markerach: naglowki -> SOS -> dane
+    entropowe -> pierwszy FFD9 za SOS. To jest miejsce, w ktorym koder
+    przestaje; wszystko po tym jest ogonem.
+    """
+    n = len(data)
+    if not data.startswith(b'\xff\xd8'):
+        return -1
+    i = 2
+    sos = -1
+    while i < n - 1:
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        m = data[i + 1]
+        if m == 0xD9:
+            return i + 2 if sos == -1 else -1   # EOI przed SOS = plik niekompletny
+        if m == 0xDA:
+            sos = i
+            break
+        if m in (0xD8, 0x01) or 0xD0 <= m <= 0xD7:
+            i += 2
+            continue
+        if i + 4 > n:
+            return -1
+        seglen = int.from_bytes(data[i + 2:i + 4], 'big')
+        if seglen < 2:
+            return -1
+        i += 2 + seglen
+    if sos == -1:
+        return -1
+    j = sos + 2
+    while j < n - 1:
+        if data[j] == 0xFF:
+            m2 = data[j + 1]
+            if m2 == 0xD9:
+                return j + 2
+            if m2 == 0x00 or 0xD0 <= m2 <= 0xD7:   # stuffing FF00 i znaczniki RSTn
+                j += 2
+                continue
+            j += 1
+        else:
+            j += 1
+    return -1
+
+
+def trailing_data(path):
+    """Bajty PO prawdziwym koncu obrazu. Plik ma "koniec" w JPEG (pierwszy
+    FFD9 za SOS) albo w PNG (IEND) - wszystko po tym jest niewidoczne
+    w podgladzie, a calkiem czytelne dla kogos, kto patrzy surowo. Stare
+    telefony i edytory tak doklejaja caly blok z metadanymi."""
+    out = []
+    try:
+        with open(path, 'rb') as fh:
+            data = fh.read()
+    except OSError:
+        return out
+    ext = os.path.splitext(path)[1].lower()
+    end = -1
+    if data.startswith(b'\xff\xd8'):
+        end = jpeg_real_end(data)
+    elif data.startswith(b'\x89PNG'):
+        pos = data.find(b'IEND')
+        if pos != -1:
+            end = pos + 8
+    elif data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return out
+    if end == -1 or end >= len(data):
+        return out
+    tail = data[end:]
+    if not tail:
+        return out
+    # kilka bajtow zer/paddingu od zapisywacza to nie wyciek
+    if len(tail) <= 8 and not any(32 < c < 127 for c in tail):
+        return out
+    t = tail[:400000].lower()
+    if b'v=spf1' in t or b'<?xpacket' in t or b'8bim' in t:
+        kind = 'caly blok EXIF/XMP/IPTC za koncem pliku'
+    elif t.startswith(b'\xff\xd8') or b'\x00\xff\xd8\xff' in t:
+        kind = 'caly drugi obraz ukryty za koncem pliku'
+    elif b'http' in t or b'<' in t:
+        kind = 'fragmenty HTML/tekstu za koncem pliku'
+    else:
+        kind = 'bajty o nieznanym formacie'
+    out.append((f'PO OBRAZIE: {len(tail)} B', kind))
+    return out
+
+
+VIDEO_GPS_KEYS = [b'\xa9xyz', b'location', b'com.apple.quicktime.location',
+                  b'GPSCoordinates', b'creation_time']
+
+
+def video_gps(path):
+    """Wideo (MP4/MOV) trzyma lokalizacje w atomie udta, nie w zdjeciach."""
+    out = []
+    try:
+        with open(path, 'rb') as fh:
+            data = fh.read(4 * 1024 * 1024)
+    except OSError:
+        return out
+    if data[4:8] != b'ftyp':
+        return out
+    for key in (b'\xa9xyz', b'location'):
+        idx = data.find(key)
+        if idx != -1:
+            frag = data[idx:idx + 120]
+            if any(c.isdigit() for c in frag.decode('latin1', 'replace')):
+                out.append(('WIDEO GPS', f'atom {key.decode("latin1")} zawiera wspolrzedne'))
+    if b'creation_time' in data:
+        out.append(('WIDEO czas', 'atom creation_time - kiedy i gdzie nagrywano'))
+    if data.find(b'com.apple.quicktime') != -1 and data.find(b'udta') != -1:
+        out.append(('WIDEO udta', 'kontener metadanych uzytkownika w pliku wideo'))
+    return out
 
 
 def scan_zip(path):
@@ -228,16 +504,69 @@ def scan_zip(path):
     return rep
 
 
-def scan_file(path):
+VIDEO_EXT = {'.mp4', '.mov', '.m4v', '.3gp', '.avi', '.mkv'}
+
+
+def scan_file(path, ruleset=None):
+    """ruleset=None -> wszystko wlaczone (tryb deweloperski).
+    W programie przekazujemy wersje z licencji."""
+    import ruleset as rs
+    rv = rs.CURRENT if ruleset is None else ruleset
     ext = os.path.splitext(path)[1].lower()
+    if ext in VIDEO_EXT:
+        rep = Report(path=path, kind='video', size=os.path.getsize(path))
+        if rs.supports(rv, 'video_gps'):
+            f = [Finding('gps' if 'GPS' in a else 'datetime', f'{a}: {b}',
+                         'HIGH' if 'GPS' in a else 'LOW',
+                         'wideo nie ma tagow EXIF - lokalizacja siedzi w atomie pliku')
+                 for a, b in video_gps(path)]
+            rep.findings = f
+        return rep
     if ext in IMG_EXT:
-        return scan_image(path)
+        rep = scan_image(path)
+        if rs.supports(rv, 'trailing_data'):
+            rep.findings.extend(
+                Finding('comment', f'{a}: {b}', 'HIGH',
+                        'bajty za znacznikiem konca obrazu - niewidoczne w podgladzie, '
+                        'czytelne dla kazdego kto otworzy plik surowo')
+                for a, b in trailing_data(path))
+        return rep
     if ext == '.zip':
         return scan_zip(path)
     rep = Report(path=path, size=os.path.getsize(path))
     rep.note = 'nieobslugiwany typ pliku'
     rep.cleanable = False
     return rep
+
+
+class UnsafeDestination(Exception):
+    """Sciezka docelowa jest tym samym plikiem co zrodlowy - odmawiamy."""
+
+
+def safe_dst(src, out_dir):
+    """Buduje docelową sciezke w out_dir, nigdy nie nadpisujac src.
+
+    Trzy warunki bezpieczenstwa:
+      1. absolutna sciezka musi byc inna niz zrodlowa
+      2. katalog docelowy nie moze byc katalogiem zrodlowym (ani jego rodzicem)
+      3. jesli nazwa koliduje, dopisujemy _clean przed rozszerzeniem
+    """
+    src_abs = os.path.abspath(src)
+    out_abs = os.path.abspath(out_dir)
+    if os.path.realpath(out_abs) == os.path.dirname(src_abs):
+        raise UnsafeDestination(
+            'katalog docelowy jest tym samym co katalog ze zdjeciami - '
+            'wybierz inny, inaczej nadpisalbysmy oryginaly')
+    base = os.path.basename(src)
+    stem, ext = os.path.splitext(base)
+    cand = os.path.join(out_abs, base)
+    if os.path.abspath(cand) == src_abs:
+        cand = os.path.join(out_abs, f'{stem}_clean{ext}')
+    n = 2
+    while os.path.exists(cand) and os.path.abspath(cand) != src_abs:
+        cand = os.path.join(out_abs, f'{stem}_clean{n}{ext}')
+        n += 1
+    return cand
 
 
 def scrub_image(src, dst, drop=('all',)):
@@ -262,12 +591,16 @@ def scrub_image(src, dst, drop=('all',)):
     return dst
 
 
-def scan_tree(root):
+def scan_tree(root, ruleset=None):
+    import ruleset as rs
+    exts = IMG_EXT | VIDEO_EXT | {'.zip'}
+    if ruleset is not None:
+        exts = exts & rs.formats_for(ruleset) | {'.zip'}
     out = []
     for dirpath, _, files in os.walk(root):
         for fn in files:
-            if os.path.splitext(fn)[1].lower() in IMG_EXT | {'.zip'}:
-                out.append(scan_file(os.path.join(dirpath, fn)))
+            if os.path.splitext(fn)[1].lower() in exts:
+                out.append(scan_file(os.path.join(dirpath, fn), ruleset))
     return out
 
 
@@ -289,8 +622,8 @@ def _cli(argv):
         for r in reps:
             if r.kind != 'image':
                 continue
-            dst = os.path.join(a.scrub, os.path.basename(r.path))
             try:
+                dst = safe_dst(r.path, a.scrub)
                 scrub_image(r.path, dst)
                 n += 1
             except Exception as e:
