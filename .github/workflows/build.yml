@@ -190,7 +190,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt nuitka
-          python -m nuitka --onefile --assume-yes-for-downloads --include-package=PIL --include-package=cryptography --output-filename=photoscrub.exe photoscrub.py
+          python -m nuitka --onefile --assume-yes-for-downloads --include-package=PIL --include-package=cryptography --output-filename=photoscrub.exe --output-dir=build photoscrub.py
       - name: Pack MSIX
         shell: pwsh
         run: |
@@ -202,7 +202,12 @@ jobs:
           }
           if (-not $kfh) { throw "makeappx.exe not found" }
           New-Item -ItemType Directory -Force msix_payload | Out-Null
-          $exe = Get-ChildItem -Path build -Filter 'photoscrub*' -File | Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
+          # Nuitka bez --output-dir pisze do biezacego katalogu, wiec plik
+          # lezy w repo, nie w build/ (i build/ w ogole nie istnieje).
+          $exe = Get-ChildItem -Path . -Recurse -File -Filter 'photoscrub.exe' -ErrorAction SilentlyContinue |
+                 Where-Object { $_.FullName -notmatch 'msix_payload|dist' } | Select-Object -First 1
+          if (-not $exe) { throw "photoscrub.exe not produced" }
+          Get-Item $exe.FullName | Select-Object FullName,Length
           Copy-Item $exe.FullName msix_payload/photoscrub.exe
           Copy-Item packaging/msix/AppxManifest.xml msix_payload/
           Copy-Item -Recurse packaging/msix/assets msix_payload/assets
