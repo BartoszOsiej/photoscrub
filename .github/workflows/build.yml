@@ -105,15 +105,25 @@ jobs:
       - name: Build exe
         run: |
           pyinstaller --onefile --name photoscrub.exe photoscrub.py
-      - name: Pack MSIX (unsigned, layout only)
+      - name: Pack MSIX (unsigned layout)
         shell: pwsh
         run: |
+          # makeappx nie jest w PATH na runnerze. Szukamy SDK w dwóch typowych miejscach.
+          $kfh = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter makeappx.exe -ErrorAction SilentlyContinue |
+                 Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1
+          if (-not $kfh) {
+            $kfh = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter makeappx.exe -ErrorAction SilentlyContinue |
+                   Select-Object -First 1
+          }
+          if (-not $kfh) { throw "makeappx.exe not found - Windows SDK missing on this runner image" }
+          "using: $($kfh.FullName)"
           New-Item -ItemType Directory -Force msix_payload | Out-Null
           Copy-Item dist/photoscrub.exe msix_payload/
           Copy-Item packaging/msix/AppxManifest.xml msix_payload/
           Copy-Item -Recurse packaging/msix/assets msix_payload/assets
           New-Item -ItemType Directory -Force msix_out | Out-Null
-          makeappx pack /d msix_payload /p msix_out/photoscrub.msix /o
+          & $kfh.FullName pack /d msix_payload /p msix_out/photoscrub.msix /o
+          if (-not (Test-Path msix_out/photoscrub.msix)) { throw "MSIX not produced" }
           Get-Item msix_out/photoscrub.msix | Select-Object Name,Length
       - uses: actions/upload-artifact@v4
         with:
