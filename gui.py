@@ -12,7 +12,7 @@ import os
 import sys
 import threading
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, ttk
 
 from PIL import Image, ImageTk
 
@@ -216,17 +216,57 @@ class App((TkinterDnD.Tk if HAS_DND else tk.Tk)):
 
     def __init__(self):
         super().__init__()
+        self._fix_dpi()
         self.title('photoscrub')
         self.configure(bg=BG)
         self.geometry('1120x780')
         self.minsize(940, 620)
+        try:
+            self.iconname('photoscrub')
+        except tk.TclError:
+            pass
         self.rows = []
         self.selected = None
+        self._dpi = 96
+        self._scaled = False
         self._build()
         self._wire_dnd()
         self._keys()
         self.toast = Toast(self)
         self.after(120, self._gate)
+
+    def _fix_dpi(self):
+        """Na Waylandzie (Hyprland) Tk leci przez XWayland i NIE WIDZI skali
+        ekranu. Efekt: czcionki i odstepy sa liczone dla 96 dpi, wiec okno jest
+        nierowne i wszystko wyglada na krzywe. Czytamy Xft.dpi i ustawiamy
+        skala zgodna z tym, co naprawde ma ekran."""
+        dpi = None
+        try:
+            dpi = int(float(self.winfo_fpixels('1i')))
+        except Exception:
+            dpi = None
+        if not dpi:
+            import subprocess
+            for cmd in (['xrdb', '-query'], ['xrandr']):
+                try:
+                    out = subprocess.run(cmd, capture_output=True, text=True,
+                                         timeout=4).stdout
+                except Exception:
+                    continue
+                for line in out.splitlines():
+                    if 'dpi' in line.lower():
+                        for tok in line.replace(',', ' ').split():
+                            if tok.isdigit() and 48 <= int(tok) <= 480:
+                                dpi = int(tok)
+                                break
+                if dpi:
+                    break
+        if dpi and dpi > 70:
+            self._dpi = dpi
+            self.tk.call('tk', 'scaling', dpi / 72.0)
+        else:
+            self._dpi = 96
+        self._scaled = bool(self._dpi > 110)
 
     # ── licencja ──────────────────────────────────────────────────────────────
     def _license(self):
@@ -364,11 +404,35 @@ class App((TkinterDnD.Tk if HAS_DND else tk.Tk)):
         left = tk.Frame(body, bg=BG)
         self.drop = DropZone(left, self.add_files)
         self.drop.pack(fill='x')
+        # Przewijanie na Canvasie. Frame nie ma yview - to byl blad, ktory
+        # wywalal program przy kazdym obrocie kola myszy.
         gridwrap = tk.Frame(left, bg=BG)
         gridwrap.pack(fill='both', expand=True, pady=(10, 0))
-        self.grid_ = tk.Frame(gridwrap, bg=BG)
-        self.grid_.pack(fill='both', expand=True)
-        for w in (self, left, gridwrap):
+        self.grid_canvas = tk.Canvas(gridwrap, bg=BG, highlightthickness=0,
+                                     bd=0, takefocus=0)
+        style = ttk.Style(self)
+        try:
+            style.theme_use('clam')
+            style.configure('photoscrub.Vertical.TScrollbar',
+                            background=LINE, troughcolor=BG, bordercolor=BG,
+                            arrowcolor=LINE, darkcolor=LINE, lightcolor=LINE,
+                            relief='flat', width=10)
+            style.map('photoscrub.Vertical.TScrollbar',
+                      background=[('active', ACC), ('!active', LINE)])
+        except tk.TclError:
+            pass
+        self.grid_scroll = ttk.Scrollbar(gridwrap, orient='vertical',
+                                         command=self.grid_canvas.yview,
+                                         style='photoscrub.Vertical.TScrollbar')
+        self.grid_canvas.configure(yscrollcommand=self._onscroll)
+        self.grid_canvas.pack(side='left', fill='both', expand=True)
+        self.grid_scroll.pack(side='right', fill='y')
+        self.grid_ = tk.Frame(self.grid_canvas, bg=BG)
+        self._grid_win = self.grid_canvas.create_window((0, 0), window=self.grid_,
+                                                       anchor='nw')
+        self.grid_.bind('<Configure>', self._grid_cfg)
+        self.grid_canvas.bind('<Configure>', self._grid_viewport)
+        for w in (self, left, gridwrap, self.grid_canvas):
             w.bind('<MouseWheel>', self._wheel)
             w.bind('<Button-4>', lambda e: self._wheel_dir(-1))
             w.bind('<Button-5>', lambda e: self._wheel_dir(1))
@@ -394,14 +458,30 @@ class App((TkinterDnD.Tk if HAS_DND else tk.Tk)):
         self.status.pack(side='left', padx=16)
 
     # ── przewijanie karty ──────────────────────────────────────────────────────
+    def _grid_cfg(self, _e=None):
+        self.grid_canvas.configure(scrollregion=self.grid_canvas.bbox('all'))
+
+    def _grid_viewport(self, e):
+        self.grid_canvas.itemconfigure(self._grid_win, width=e.width)
+
+    def _onscroll(self, first, last):
+        # scrollbar pojawia sie tylko wtedy, gdy jest co przewijac
+        need = not (float(first) <= 0.0 and float(last) >= 1.0)
+        if need and not self.grid_scroll.winfo_ismapped():
+            self.grid_scroll.pack(side='right', fill='y')
+        elif not need and self.grid_scroll.winfo_ismapped():
+            self.grid_scroll.pack_forget()
+        self.grid_scroll.set(first, last)
+
     def _wheel(self, event):
-        self.grid_.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+        d = int(-1 * (event.delta / 120)) if event.delta else 0
+        if d:
+            self.grid_canvas.yview_scroll(d, 'units')
+        else:
+            self._wheel_dir(-1 if getattr(event, 'num', 5) == 4 else 1)
 
     def _wheel_dir(self, d):
-        self.grid_.yview_scroll(d, 'units')
-
-    def _scroll(self, *a):
-        self.grid_.yview(*a)
+        self.grid_canvas.yview_scroll(d, 'units')
 
     def _btn(self, parent, text, cmd):
         b = tk.Button(parent, text=text, command=cmd, bg=PANEL, activebackground=PANEL_2,
@@ -591,13 +671,26 @@ class App((TkinterDnD.Tk if HAS_DND else tk.Tk)):
         self.grid_.update_idletasks()
         avail = self.grid_.winfo_width() or 700
         cols = max(2, min(6, (avail - 12) // 246))
+        self._done_label()
+        # rowna szerokosc kolumn inaczej karty sie rozjechaja i wyglada jak szachy
+        for c in range(cols):
+            self.grid_.grid_columnconfigure(c, weight=1, uniform='cards')
         for i, (r, t, s) in enumerate(rows):
             label, risk = self._badge(s, r)
             Card(self.grid_, r, t, label, risk, self.show_detail,
                  self._hover).grid(row=i // cols, column=i % cols, padx=6, pady=6,
-                                   sticky='n')
+                                   sticky='nsew')
         if self.selected is None and rows:
             self.show_detail(rows[0][0])
+
+    def _done_label(self):
+        """Po skanowaniu napis 'Sprawdzam…' znika - inaczej lezy na dole
+        jak maszyna, ktora sie zatrzymala."""
+        try:
+            if self.status.cget('text').startswith('Sprawdzam'):
+                self.status.configure(text='', fg=DIM)
+        except tk.TclError:
+            pass
 
     def _set_stats(self, files, dirty, high, clean, risk):
         for key, val in (('files', files), ('dirty', dirty), ('high', high),
@@ -619,6 +712,8 @@ class App((TkinterDnD.Tk if HAS_DND else tk.Tk)):
         return short.get(s['class'], s['class']), s['risk']
 
     def _hover(self, rep):
+        if rep is self.selected:
+            return
         self.show_detail(rep, keep_name=True)
 
     def show_detail(self, rep, keep_name=False):
