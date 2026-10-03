@@ -4,13 +4,15 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'tag to build (e.g. v1.0.0)'
-        required: true
 
 permissions:
   contents: write
+
+env:
+  NUITKA: >-
+    python -m nuitka --onefile --assume-yes-for-downloads
+    --include-package=PIL --include-package=cryptography
+    --include-package=tkinterdnd2 --enable-plugin=tk-inter
 
 jobs:
   linux:
@@ -20,42 +22,36 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install
+      - name: Install and smoke test
         run: |
+          set -e
           python -m pip install --upgrade pip
           pip install -r requirements.txt nuitka
-      - name: Smoke test the engine
+          python photoscrub.py --help > /dev/null
+          python -c "import model, license, ruleset; print('modules ok')"
+      - name: Build CLI with Nuitka
         run: |
-          python - <<'PY'
-          import subprocess, sys, os
-          # engine musi dzialac na Linuksie, inaczej nie wydajemy nic
-          r = subprocess.run([sys.executable, 'photoscrub.py', '--help'],
-                             capture_output=True, text=True)
-          assert r.returncode == 0, r.stderr
-          print('engine ok')
-          PY
-      - name: Build onefile binary (Nuitka - brak .pyc do rozpakowania)
+          set -e
+          python -m nuitka --onefile --assume-yes-for-downloads \
+            --include-package=PIL --include-package=cryptography \
+            --output-filename=photoscrub photoscrub.py
+          ls -la dist/ || true
+      - name: Normalise name and test the binary
         run: |
-          python -m nuitka \
-            --onefile \
-            --assume-yes-for-downloads \
-            --output-filename=photoscrub \
-            --include-package=PIL \
-            --include-package=cryptography \
-            photoscrub.py
-      - name: Test the binary
-        run: |
-          chmod +x dist/photoscrub
-          ./dist/photoscrub --help
-          ./dist/photoscrub /tmp || true
-      - name: Checksum + package
-        run: |
-          cd dist
-          sha256sum photoscrub > photoscrub-linux.sha256
+          set -e
+          rm -rf staging && mkdir staging
+          bin="$(find dist -maxdepth 1 -type f -name 'photoscrub*' ! -name '*.build' ! -name '*.dist' ! -name '*.onefile' | head -1)"
+          echo "binary: $bin"
+          test -n "$bin"
+          cp "$bin" staging/photoscrub
+          chmod +x staging/photoscrub
+          ./staging/photoscrub --help > /dev/null
+          echo "linux binary runs"
+          cd staging && sha256sum photoscrub > photoscrub-linux.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: photoscrub-linux
-          path: dist/
+          path: staging/
 
   windows:
     runs-on: windows-latest
@@ -64,40 +60,33 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install
+      - name: Install and smoke test
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt nuitka
-      - name: Smoke test the engine
-        shell: pwsh
-        run: |
           python photoscrub.py --help
-          if ($LASTEXITCODE -ne 0) { throw "engine failed on Windows" }
-          "engine ok on windows"
-      - name: Build exe (Nuitka - brak .pyc do rozpakowania)
+          python -c "import model, license, ruleset; print('modules ok')"
+      - name: Build CLI with Nuitka
         run: |
-          python -m nuitka \
-            --onefile \
-            --assume-yes-for-downloads \
-            --output-filename=photoscrub.exe \
-            --include-package=PIL \
-            --include-package=PIL.Image \
-            --include-package=cryptography \
-            photoscrub.py
-      - name: Test the exe
+          python -m nuitka --onefile --assume-yes-for-downloads --include-package=PIL --include-package=cryptography --output-filename=photoscrub.exe photoscrub.py
+          dir dist
+      - name: Normalise name and test the exe
         shell: pwsh
         run: |
-          .\dist\photoscrub.exe --help
+          $bin = Get-ChildItem -Path dist -Filter 'photoscrub*' -File |
+                 Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
+          if (-not $bin) { throw "exe not produced" }
+          New-Item -ItemType Directory -Force staging | Out-Null
+          Copy-Item $bin.FullName staging/photoscrub.exe
+          & .\staging\photoscrub.exe --help
           if ($LASTEXITCODE -ne 0) { throw "built exe does not run" }
-          "exe runs on windows"
-      - name: Checksum
-        run: |
-          cd dist
-          (Get-FileHash photoscrub.exe -Algorithm SHA256).Hash.ToLower() + "  photoscrub.exe" | Out-File -Encoding ascii photoscrub-windows.sha256
+          "windows exe runs"
+          (Get-FileHash staging/photoscrub.exe -Algorithm SHA256).Hash.ToLower() + "  photoscrub.exe" |
+            Out-File -Encoding ascii staging/photoscrub-windows.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: photoscrub-windows
-          path: dist/
+          path: staging/
 
   gui:
     runs-on: ${{ matrix.os }}
@@ -106,84 +95,80 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            out: dist/photoscrub-gui.exe
-            cmd: powershell
+            out: photoscrub-gui.exe
           - os: ubuntu-latest
-            out: dist/photoscrub-gui
-            cmd: bash
+            out: photoscrub-gui
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install (Linux needs tk)
+      - name: System packages
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y python3-tk tk
+          fi
+      - name: Python packages
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt nuitka
-          if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update && sudo apt-get install -y python3-tk; fi
       - name: Build GUI with Nuitka
         run: |
-          python -m nuitka \
-            --onefile \
-            --assume-yes-for-downloads \
-            --output-filename=photoscrub-gui \
-            --include-package=PIL \
-            --include-package=cryptography \
-            --include-package=tkinterdnd2 \
-            --enable-plugin=tk-inter \
-            gui.py
-      - name: Move binary to expected name
+          set -e
+          python -m nuitka --onefile --assume-yes-for-downloads \
+            --include-package=PIL --include-package=cryptography \
+            --include-package=tkinterdnd2 --enable-plugin=tk-inter \
+            --output-filename=${{ matrix.out }} gui.py
+          ls -la dist/ || true
+      - name: Stage the binary
         shell: pwsh
         run: |
-          if ("${{ runner.os }}" -eq "Windows") { Move-Item -Force dist/gui.exe dist/photoscrub-gui.exe }
-          else { Move-Item -Force dist/gui.bin dist/photoscrub-gui 2>$null; Move-Item -Force dist/gui dist/photoscrub-gui 2>$null }
+          $want = "${{ matrix.out }}"
+          $bin = Get-ChildItem -Path dist -File |
+                 Where-Object { $_.Name -notmatch '\.(build|dist|onefile)$' -and
+                                ($_.Name -match 'gui|photoscrub') } |
+                 Select-Object -First 1
+          if (-not $bin) { throw "gui binary not produced" }
+          New-Item -ItemType Directory -Force "staging-${{ matrix.os }}" | Out-Null
+          Copy-Item $bin.FullName "staging-${{ matrix.os }}/$want"
+          Get-ChildItem "staging-${{ matrix.os }}"
       - uses: actions/upload-artifact@v4
         with:
           name: photoscrub-gui-${{ runner.os }}
-          path: dist/
+          path: staging-${{ matrix.os }}/
 
   msix:
     runs-on: windows-latest
-    needs: windows
+    needs: [windows]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install
+      - name: Build exe
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt nuitka
-      - name: Build exe (Nuitka - brak .pyc do rozpakowania)
-        run: |
-          python -m nuitka \
-            --onefile \
-            --assume-yes-for-downloads \
-            --output-filename=photoscrub.exe \
-            --include-package=PIL \
-            --include-package=PIL.Image \
-            --include-package=cryptography \
-            photoscrub.py
-      - name: Pack MSIX (unsigned layout)
+          python -m nuitka --onefile --assume-yes-for-downloads --include-package=PIL --include-package=cryptography --output-filename=photoscrub.exe photoscrub.py
+      - name: Pack MSIX
         shell: pwsh
         run: |
-          # makeappx nie jest w PATH na runnerze. Szukamy SDK w dwóch typowych miejscach.
           $kfh = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter makeappx.exe -ErrorAction SilentlyContinue |
                  Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1
           if (-not $kfh) {
             $kfh = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter makeappx.exe -ErrorAction SilentlyContinue |
                    Select-Object -First 1
           }
-          if (-not $kfh) { throw "makeappx.exe not found - Windows SDK missing on this runner image" }
-          "using: $($kfh.FullName)"
+          if (-not $kfh) { throw "makeappx.exe not found" }
           New-Item -ItemType Directory -Force msix_payload | Out-Null
-          Copy-Item dist/photoscrub.exe msix_payload/
+          $exe = Get-ChildItem -Path dist -Filter 'photoscrub*' -File | Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
+          Copy-Item $exe.FullName msix_payload/photoscrub.exe
           Copy-Item packaging/msix/AppxManifest.xml msix_payload/
           Copy-Item -Recurse packaging/msix/assets msix_payload/assets
           New-Item -ItemType Directory -Force msix_out | Out-Null
           & $kfh.FullName pack /d msix_payload /p msix_out/photoscrub.msix /o
           if (-not (Test-Path msix_out/photoscrub.msix)) { throw "MSIX not produced" }
-          Get-Item msix_out/photoscrub.msix | Select-Object Name,Length
       - uses: actions/upload-artifact@v4
         with:
           name: photoscrub-msix
@@ -201,27 +186,32 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/photoscrub-msix/msix_out/photoscrub.msix
             artifacts/photoscrub-linux/photoscrub
             artifacts/photoscrub-linux/photoscrub-linux.sha256
             artifacts/photoscrub-windows/photoscrub.exe
             artifacts/photoscrub-windows/photoscrub-windows.sha256
-            artifacts/photoscrub-gui-Windows/dist/photoscrub-gui.exe
-            artifacts/photoscrub-gui-Linux/dist/photoscrub-gui
+            artifacts/photoscrub-gui-Windows/photoscrub-gui.exe
+            artifacts/photoscrub-gui-Linux/photoscrub-gui
+            artifacts/photoscrub-msix/msix_out/photoscrub.msix
           body: |
-            Metadata leak scanner and remover. Local, offline, no account.
+            Find out what your photos leak, then strip it. Local, offline, no account.
 
-            GUI  Windows: `photoscrub-gui.exe`
-            GUI  Linux:   `chmod +x photoscrub-gui && ./photoscrub-gui`
-            CLI  Windows: `photoscrub.exe`
-            CLI  Linux:   `chmod +x photoscrub && ./photoscrub PATH`
+            **GUI**
+            - Windows: `photoscrub-gui.exe`
+            - Linux: `chmod +x photoscrub-gui && ./photoscrub-gui`
 
-            Need a license key? Ask, and you get one. Ruleset v1 covers EXIF, GPS,
-            serial and the thumbnail hidden inside the JPEG. Ruleset v2 adds HEIC,
-            XMP, IPTC, PNG chunks, data appended after the image, GPS in video, and
-            addresses in free text.
+            **CLI**
+            - Windows: `photoscrub.exe`
+            - Linux: `chmod +x photoscrub && ./photoscrub PATH`
 
-            Verify:
+            **MSIX** (for MS Store packaging): `photoscrub.msix`
+
+            Verify (Linux):
             ```
             sha256sum -c photoscrub-linux.sha256
             ```
+
+            A license key is needed to remove anything. Ask and you get one.
+            Ruleset v1 covers EXIF, GPS, device serial and the thumbnail hidden inside
+            the JPEG. Ruleset v2 adds HEIC, XMP, IPTC, PNG chunks, data appended after
+            the image, GPS in video, and addresses in free text.
