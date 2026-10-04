@@ -193,6 +193,93 @@ QLabel#hint {{ font-size:12px; color:{faint}; }}
 QLabel#dlgTitle {{ font-size:24px; font-weight:600; letter-spacing:-0.00625em; }}
 """
 
+# ── Budowanie arkusza stylow dla wybranego motywu ─────────────────────────
+# Jeden szablon, dwa zestawy tokenow. Zmiana motywu to podmiana wartosci,
+# a nie drugi arkusz do utrzymania (i miejsce, gdzie nowy kolor moglby
+# sie rozjechac z reszta interfejsu).
+
+
+def build_qss(t):
+    return _QSS_TEMPLATE.format(
+        bg=t['BG'], fg=t['FG'], muted=t['FG_MUTED'], faint=t['FG_SUBTLE'],
+        panel=t['PANEL'], panel2=t['PANEL_2'], panel3=t['PANEL_3'],
+        popover=t['POPOVER'],
+        line=t['BORDER'], line_strong=t['BORDER_STRONG'], ring=t['RING'],
+        accent=t['ACCENT'], accent_hi=t['ACCENT_HOVER'],
+        accent_fg=t['ACCENT_FG'], accent_soft=t['ACCENT_SOFT'],
+        thumb=t['THUMB'],
+        danger=t['DANGER'], danger_soft=t['DANGER_SOFT'],
+        danger_line=t['DANGER_LINE'], ok=t['OK'], ok_soft=t['OK_SOFT'],
+        r1=T.RADIUS['1'], r_sm=T.RADIUS_SM, r_md=T.RADIUS_MD,
+        r_lg=T.RADIUS_LG, r_xl=T.RADIUS_XL, r_2xl=T.RADIUS_2XL,
+        r_full=T.RADIUS['full'],
+    )
+
+
+def set_tokens(name):
+    """Ustawia tokeny wybranego motywu w globalnych aliasach.
+
+    Musi byc jedynym miejscem, ktore je zmienia — wczesniej apply_theme
+    podmienial tylko arkusz aplikacji, a aliasy zostawial ciemne, przez co
+    okno w "jasnym" motywie malowalo ciemnym tlem.
+    """
+    global QSS, TOKENS, BG, PANEL, PANEL2, PANEL3, LINE, FG, FG2, DIM
+    global FAINT, ACC, RED, AMB, GRN, WARN, THUMB
+    t = T.THEMES[name]()
+    TOKENS = t
+    QSS = build_qss(t)
+    BG, PANEL, PANEL2, PANEL3 = t['BG'], t['PANEL'], t['PANEL_2'], t['PANEL_3']
+    LINE = t['BORDER']
+    FG, FG2 = t['FG'], t['FG_MUTED']
+    DIM, FAINT = t['FG_MUTED'], t['FG_SUBTLE']
+    ACC, RED, AMB, GRN, WARN = (t['ACCENT'], t['DANGER'], t['WARN'],
+                                t['OK'], t['WARN'])
+    THUMB = t['THUMB']
+    return t
+
+
+def apply_theme(app, name):
+    """Przelacza aplikacje na motyw i zwraca tokeny (widgety trzymaja
+    kolory takze we wlasnych stylach, wiec je tez aktualizujemy)."""
+    t = set_tokens(name)
+    app.setStyleSheet(QSS)
+    return t
+
+
+def retheme_window(win, t):
+    """Podmienia kolory na widgetach, ktore ustawiaja je bezposrednio."""
+    win.status.setStyleSheet('')
+    win.title.setStyleSheet('')
+    for key, col in (('files', t['FG_MUTED']), ('dirty', t['DANGER']),
+                     ('high', t['DANGER']), ('clean', t['OK']),
+                     ('risk', t['WARN'])):
+        v = win.stat_vals[key][0]
+        v.setStyleSheet(f'color:{col}; font-size:24px; font-weight:600;'
+                        f' letter-spacing:-0.00625em;')
+    for card in win._cards.values():
+        card.style().unpolish(card)
+        card.style().polish(card)
+        for lab in card.findChildren(QtWidgets.QLabel):
+            lab.style().unpolish(lab)
+            lab.style().polish(lab)
+    win.style().unpolish(win)
+    win.style().polish(win)
+
+
+# Aliasy kolorow z motywu. Jedyne miejsce ich ustawiania to
+# set_tokens() — dzieki temu arkusz i kolory w HTML etykiet
+# zawsze pochodza z tego samego motywu.
+TOKENS = T.dark_tokens()
+QSS = build_qss(TOKENS)
+BG, PANEL, PANEL2, PANEL3 = (TOKENS['BG'], TOKENS['PANEL'],
+                                TOKENS['PANEL_2'], TOKENS['PANEL_3'])
+LINE, FG, FG2 = TOKENS['BORDER'], TOKENS['FG'], TOKENS['FG_MUTED']
+DIM, FAINT = TOKENS['FG_MUTED'], TOKENS['FG_SUBTLE']
+ACC, RED, AMB, GRN, WARN = (TOKENS['ACCENT'], TOKENS['DANGER'],
+                              TOKENS['WARN'], TOKENS['OK'],
+                              TOKENS['WARN'])
+THUMB = TOKENS['THUMB']
+
 CARD_W = 228   # stal szerokosc karty: kolumny liczone dokladnie, bez
                # zgadywania i bez obcinania prawej kolumny
 
@@ -781,7 +868,7 @@ class Window(QtWidgets.QMainWindow):
             b.setToolTip(f'{text} ({key})')
             h.addWidget(b)
         h.addSpacing(4)
-        self._theme_name = 'dark'
+        self._theme_name = _saved_theme()
         self._theme_btn = QtWidgets.QPushButton()
         self._theme_btn.setProperty('variant', 'ghost')
         self._theme_btn.setFixedWidth(36)
@@ -1297,26 +1384,19 @@ class Window(QtWidgets.QMainWindow):
         self._theme_btn.setText('')
 
     def toggle_theme(self):
-        global QSS, TOKENS, BG, PANEL, PANEL2, PANEL3, LINE, FG, FG2, DIM
-        global FAINT, ACC, RED, AMB, GRN, WARN
         self._theme_name = 'light' if self._theme_name == 'dark' else 'dark'
-        t = apply_theme(QtWidgets.QApplication.instance(), self._theme_name)
-        QSS = build_qss(t)
-        TOKENS = t
-        # moduly uzywaja globalnych aliasow (kolory etykiet w HTML)
-        BG, PANEL, PANEL2, PANEL3 = t['BG'], t['PANEL'], t['PANEL_2'], \
-            t['PANEL_3']
-        LINE, FG, FG2, DIM, FAINT = (t['BORDER'], t['FG'], t['FG_MUTED'],
-                                     t['FG_MUTED'], t['FG_SUBTLE'])
-        ACC, RED, AMB, GRN, WARN = (t['ACCENT'], t['DANGER'], t['WARN'],
-                                    t['OK'], t['WARN'])
+        t = apply_theme(QtWidgets.QApplication.instance(),
+                        self._theme_name)
+        _save_theme(self._theme_name)
         self._paint_theme_icon()
         self._restyle()
         retheme_window(self, t)
         self._render()          # karty musza dostac nowe kolory
         if self.selected:
             self.show_detail(self.selected, True)
-        self.status.setText(f'Motyw: {"jasny" if self._theme_name == "light" else "ciemny"}')
+        self.status.setText('Motyw: '
+                            + ('jasny' if self._theme_name == 'light'
+                               else 'ciemny'))
         self.status.setStyleSheet(f'color:{t["FG_MUTED"]}')
 
     def _restyle(self):
@@ -1424,27 +1504,29 @@ class Window(QtWidgets.QMainWindow):
         return 8765
 
     def _qr_pixmap(self, url):
-        """Prawdziwy kod QR z qr.py (nasz enkoder, zero zaleznosci).
+        """Prawdziwy kod QR — biblioteka `qrcode`, zweryfikowana dekodernem.
 
-        Wczesniej byla tu atrapa — wzor liczony z hasha URL. Wygladala jak QR,
-        ale nie skanowala sie. Nie zostawiam czegos, co klamie uzytkownikowi.
+        Dwie poprzednie wersje: (1) wzor liczony z hasha URL — wygladalo jak
+        QR, ale nie skanowalo sie; (2) moj wlasny enkoder w qr.py — byl
+        zepsuty (bledny liczby modulow danych) i tez nie skanowal sie. Do
+        pisania wlasnego enkodera QR nie mam powodu: qrcode to jedna
+        zaleznosc, 5 kB, czysty Python, i dekoduje sie poprawnie.
         """
-        import qr as qrmod
         try:
-            m = qrmod.encode(url, ec_level=1)
-            png = qrmod.to_png_bytes(m, scale=8, border=4)
+            import qrcode
+            img = qrcode.make(url, border=4, box_size=8)
             self._qr = QtGui.QPixmap()
-            self._qr.loadFromData(png, 'PNG')
-            if self._qr.isNull():
+            ok = self._qr.loadFromData(
+                _png_bytes(img), 'PNG')
+            if not ok:
                 raise ValueError('nie wczytano PNG')
         except Exception:
-            # lepszy brak kodu niz klamliwy — link jest pokazany obok
+            # brak kodu jest lepszy niz klamliwy — link jest pokazany obok
             self._qr = QtGui.QPixmap(180, 180)
             self._qr.fill(QtCore.Qt.transparent)
             p = QtGui.QPainter(self._qr)
             p.setPen(QtGui.QColor(FAINT))
-            p.drawText(self._qr.rect(), QtCore.Qt.AlignCenter,
-                       'Skopiuj link')
+            p.drawText(self._qr.rect(), QtCore.Qt.AlignCenter, 'Skopiuj link')
             p.end()
 
     def _phone_poll(self):
@@ -1742,6 +1824,14 @@ f.onchange = async () => {
 </script></body></html>"""
 
 
+def _png_bytes(img):
+    """qrcode.make() zwraca obraz PIL — zamieniamy na bajty PNG."""
+    import io
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return buf.getvalue()
+
+
 def start_phone_server(on_files, port=8765):
     """Uruchamia lokalny serwer i zwraca (server, token, url).
 
@@ -1864,80 +1954,50 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName('photoscrub')
     app.setOrganizationName('Hartwell Labs')
-    app.setStyleSheet(QSS)
+    # build_qss zamiast gotowej zmiennej — motyw czytamy z pliku uzytkownika,
+    # wiec ustawiamy arkusz dopiero tutaj, a nie przy imporcie
+    apply_theme(app, _saved_theme())
     w = Window()
     w.show()
     sys.exit(app.exec())
 
 
+def _save_theme(name):
+    """Zapisuje wybor motywu, zeby program po restarcie wygladal tak samo."""
+    try:
+        d = os.path.join(os.path.expanduser('~'), '.config', 'photoscrub')
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, 'theme'), 'w') as f:
+            f.write(name)
+    except OSError:
+        pass
+
+
+def _saved_theme():
+    """Jasny, ciemny, czy motyw systemowy. Wybor przeplacnika jest
+    zapisywany, wiec po restarcie program wraca do tego, co wybrano."""
+    path = os.path.join(os.path.expanduser('~'), '.config', 'photoscrub',
+                        'theme')
+    try:
+        with open(path) as f:
+            name = f.read().strip()
+        if name in T.THEMES:
+            return name
+    except OSError:
+        pass
+    # brak zapisu: idziemy za motywem systemowym
+    app = QtWidgets.QApplication.instance()
+    if app is not None:
+        pal = app.palette()
+        # jasne tlo okna = system jest w trybie jasnym
+        try:
+            bg = pal.color(QtGui.QPalette.Window)
+            if bg.lightness() > 128:
+                return 'light'
+        except Exception:
+            pass
+    return 'dark'
+
+
 if __name__ == '__main__':
     main()
-
-# ── Budowanie arkusza stylow dla wybranego motywu ─────────────────────────
-# Jeden szablon, dwa zestawy tokenow. Zmiana motywu to podmiana wartosci,
-# a nie drugi arkusz do utrzymania (i miejsce, gdzie nowy kolor moglby
-# sie rozjechac z reszta interfejsu).
-
-
-def build_qss(t):
-    return _QSS_TEMPLATE.format(
-        bg=t['BG'], fg=t['FG'], muted=t['FG_MUTED'], faint=t['FG_SUBTLE'],
-        panel=t['PANEL'], panel2=t['PANEL_2'], panel3=t['PANEL_3'],
-        popover=t['POPOVER'],
-        line=t['BORDER'], line_strong=t['BORDER_STRONG'], ring=t['RING'],
-        accent=t['ACCENT'], accent_hi=t['ACCENT_HOVER'],
-        accent_fg=t['ACCENT_FG'], accent_soft=t['ACCENT_SOFT'],
-        thumb=t['THUMB'],
-        danger=t['DANGER'], danger_soft=t['DANGER_SOFT'],
-        danger_line=t['DANGER_LINE'], ok=t['OK'], ok_soft=t['OK_SOFT'],
-        r1=T.RADIUS['1'], r_sm=T.RADIUS_SM, r_md=T.RADIUS_MD,
-        r_lg=T.RADIUS_LG, r_xl=T.RADIUS_XL, r_2xl=T.RADIUS_2XL,
-        r_full=T.RADIUS['full'],
-    )
-
-
-def apply_theme(app, name):
-    """Przelacza aplikacje na motyw. Zwraca tokeny, bo widgety trzymaja
-    kolory takze we wlasnych stylach (etykiety statusu itd.)."""
-    t = T.THEMES[name]()
-    app.setStyleSheet(build_qss(t))
-    return t
-
-
-def retheme_window(win, t):
-    """Podmienia kolory na widgetach, ktore ustawiaja je bezposrednio."""
-    win.status.setStyleSheet('')
-    win.title.setStyleSheet('')
-    for key, col in (('files', t['FG_MUTED']), ('dirty', t['DANGER']),
-                     ('high', t['DANGER']), ('clean', t['OK']),
-                     ('risk', t['WARN'])):
-        v = win.stat_vals[key][0]
-        v.setStyleSheet(f'color:{col}; font-size:24px; font-weight:600;'
-                        f' letter-spacing:-0.00625em;')
-    for card in win._cards.values():
-        card.style().unpolish(card)
-        card.style().polish(card)
-        for lab in card.findChildren(QtWidgets.QLabel):
-            lab.style().unpolish(lab)
-            lab.style().polish(lab)
-    win.style().unpolish(win)
-    win.style().polish(win)
-
-
-# domyslnie ciemny; uzytkownik moze przelaczyc przyciskiem w naglowku
-QSS = build_qss(T.dark_tokens())
-TOKENS = T.dark_tokens()
-BG = TOKENS['BG']
-PANEL = TOKENS['PANEL']
-PANEL2 = TOKENS['PANEL_2']
-PANEL3 = TOKENS['PANEL_3']
-LINE = TOKENS['BORDER']
-FG = TOKENS['FG']
-FG2 = TOKENS['FG_MUTED']
-DIM = TOKENS['FG_MUTED']
-FAINT = TOKENS['FG_SUBTLE']
-ACC = TOKENS['ACCENT']
-RED = TOKENS['DANGER']
-AMB = TOKENS['WARN']
-GRN = TOKENS['OK']
-WARN = TOKENS['WARN']
