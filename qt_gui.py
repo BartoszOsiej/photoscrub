@@ -1451,6 +1451,18 @@ class Window(QtWidgets.QMainWindow):
         self._phone_link.setWordWrap(True)
         v.addWidget(self._phone_link)
 
+        # kilka adresow = kilka kart (WiFi, kabel, VPN, Hyper-V). Pokazujemy
+        # je wszystkie, bo telefon moze byc w innej podsieci niz laptop.
+        lan = [u for u in urls if '127.0.0.1' not in u]
+        if len(lan) > 1:
+            alt = QtWidgets.QLabel('Inne adresy: ' + '   '.join(
+                u.replace('http://', '').split('?')[0] for u in lan[1:]))
+            alt.setObjectName('hint')
+            alt.setWordWrap(True)
+            alt.setAlignment(QtCore.Qt.AlignCenter)
+            v.addWidget(alt)
+
+
         self._phone_status = QtWidgets.QLabel('Czekam na pliki z telefonu…')
         self._phone_status.setObjectName('subtitle')
         self._phone_status.setAlignment(QtCore.Qt.AlignCenter)
@@ -1785,6 +1797,11 @@ PHONE_PAGE = """<!doctype html>
           color:#b0b4ba; font-family:ui-monospace,monospace; }
   .warn { margin-top:16px; padding:12px; border-radius:10px; font-size:13px;
           background:rgba(255,197,61,.12); color:#ffc53d; line-height:18px; }
+  #bar { display:none; margin-top:12px; height:6px; border-radius:3px;
+         background:rgba(221,234,248,.15); overflow:hidden; }
+  #barfill { display:block; height:100%; width:0; background:#3e63dd;
+             transition:width .15s linear; }
+  #list div { padding:2px 0; }
 </style></head><body>
 <div class="card">
   <h1>Wyślij zdjęcia</h1>
@@ -1793,6 +1810,7 @@ PHONE_PAGE = """<!doctype html>
   <label class="btn" for="f">Wybierz z galerii</label>
   <input type="file" id="f" accept="image/*,video/*" multiple>
   <div id="count">Czekam na pliki…</div>
+  <div id="bar"><i id="barfill"></i></div>
   <div id="list"></div>
   <div class="warn">Zwykłe zdjęcia z telefonu nie mają metadanych EXIF.
      Jeśli chcesz sprawdzić w oryginale, włącz „Użyj oryginałów” w aplikacji
@@ -1800,26 +1818,74 @@ PHONE_PAGE = """<!doctype html>
 </div>
 <script>
 const f = document.getElementById('f'), c = document.getElementById('count'),
-      l = document.getElementById('list');
+      l = document.getElementById('list'), bar = document.getElementById('bar'),
+      fill = document.getElementById('barfill');
+const TOKEN = new URLSearchParams(location.search).get('t') || '';
+const MAX = 512 * 1024 * 1024;          // limit pojedynczego pliku
+const out = [], errs = [];
+
+function log(txt, cls) {
+  const d = document.createElement('div');
+  d.textContent = txt; if (cls) d.className = cls;
+  l.appendChild(d); l.scrollTop = l.scrollHeight;
+}
+const mb = b => (b / 1048576).toFixed(1) + ' MB';
+
+/* XHR, nie fetch: fetch nie daje postepu uploadu, a przy filmie z telefonu
+   uzytkownik bez paska postepu mysli, ze sie zawiesilo. */
+function upload(file) {
+  return new Promise((resolve, reject) => {
+    if (file.size > MAX) {
+      const e = new Error('plik za duży (' + mb(file.size) + ' > ' + mb(MAX) + ')');
+      log('✗ ' + file.name + ' — ' + e.message, 'err');
+      return reject(e);
+    }
+    const fd = new FormData();
+    fd.append('f', file, file.name);
+    fd.append('token', TOKEN);
+
+    const x = new XMLHttpRequest();
+    x.open('POST', '/upload');
+    x.setRequestHeader('X-Photoscrub-Token', TOKEN);
+    x.responseType = 'text';
+    x.upload.onprogress = ev => {
+      if (!ev.lengthComputable) return;
+      const pc = ev.loaded / ev.total * 100;
+      fill.style.width = pc + '%';
+      c.textContent = 'Wysyłam ' + file.name + ' — ' + mb(ev.loaded)
+                    + ' z ' + mb(ev.total) + ' (' + Math.round(pc) + '%)';
+    };
+    x.onerror = () => reject(new Error('brak połączenia z komputerem'));
+    x.ontimeout = () => reject(new Error('przekroczono czas'));
+    x.onload = () => {
+      let j = {}; try { j = JSON.parse(x.responseText); } catch (e) {}
+      if (x.status !== 200 || j.error) {
+        return reject(new Error(j.error || ('HTTP ' + x.status)));
+      }
+      (j.files || []).forEach(n => { out.push(n); log('✓ ' + n, 'ok'); });
+      resolve(j);
+    };
+    x.timeout = 10 * 60 * 1000;          // duze filmy bywaja wolne
+    x.send(fd);
+  });
+}
+
+/* Jeden plik = jedno żądanie. Wszystko naraz wyglądaalo prościej, ale jeden
+   za duży plik wywalal cala paczke i uzytkownik nie dostawal nic. */
 f.onchange = async () => {
   const files = [...f.files];
   if (!files.length) return;
-  c.className = ''; c.textContent = 'Wysyłam ' + files.length + ' plików…';
-  l.textContent = '';
-  const fd = new FormData();
-  files.forEach(x => fd.append('f', x, x.name));
-  fd.append('token', new URLSearchParams(location.search).get('t') || '');
-  try {
-    const r = await fetch('/upload', { method:'POST', body: fd });
-    const j = await r.json();
-    if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status));
-    c.className = 'ok';
-    c.textContent = 'Gotowe — ' + j.saved + ' plików na komputerze.';
-    l.textContent = (j.files || []).map(x => '✓ ' + x).join('\n');
-  } catch (e) {
-    c.className = 'err';
-    c.textContent = 'Nie udało się: ' + e.message;
+  c.className = ''; l.textContent = ''; out.length = 0; errs.length = 0;
+  bar.style.display = 'block';
+  for (let i = 0; i < files.length; i++) {
+    try { await upload(files[i]); }
+    catch (e) { errs.push(files[i].name + ' — ' + e.message); }
+    fill.style.width = ((i + 1) / files.length * 100) + '%';
   }
+  bar.style.display = 'none';
+  c.className = errs.length ? 'err' : 'ok';
+  c.textContent = 'Na komputerze: ' + out.length + ' z ' + files.length + ' plików'
+                + (errs.length ? ', nie udało się: ' + errs.length : '');
 };
 </script></body></html>"""
 
@@ -1832,14 +1898,255 @@ def _png_bytes(img):
     return buf.getvalue()
 
 
+# Limity. 200 MB na cale żądanie było za mało (telefon wysyła filmik 4K),
+# a brak limitu na plik oznaczał, że jeden plik wywracał pozostałe.
+MAX_UPLOAD = 512 * 1024 * 1024
+CHUNK = 1 << 16
+
+
+class _Body:
+    """Czytnik ciała żądania: Content-Length albo chunked, z limitem.
+
+    Wcześniejsza wersja robiła `self.rfile.read(Content-Length)` i `split()`
+    na bajtach. Przy 200 MB wideo to ~600 MB RAMu i jedna zła partycja
+    gubiła wszystkie pliki. Teraz ciało leci strumieniowo, partia jest
+    wycinana bajt po bajcie i od razu zapisywana na dysk.
+    """
+
+    def __init__(self, rfile, headers, limit=MAX_UPLOAD):
+        self.rfile = rfile
+        self.limit = limit
+        self.left = -1                     # -1 = nieznane (chunked)
+        self.done = False
+        te = (headers.get('Transfer-Encoding') or '').lower()
+        self.chunked = 'chunked' in te
+        if self.chunked:
+            self.total = 0
+        else:
+            try:
+                self.left = int(headers.get('Content-Length') or 0)
+            except ValueError:
+                self.left = 0
+            self.total = self.left
+            if self.left < 0:
+                raise ValueError('size')
+            if self.left == 0:
+                raise ValueError('empty')      # nie pusty request, tylko zly
+            if self.left > limit:
+                raise ValueError('size')
+
+    def _chunk_size(self):
+        line = self.rfile.readline(64)
+        # CRLF konczace poprzedni chunk zostal w strumieniu — pomijamy puste
+        # linie, inaczej int(b'', 16) wywalaloby cala wysylke
+        while line in (b'\r\n', b'\n', b''):
+            if line == b'':
+                raise ValueError('chunk')
+            line = self.rfile.readline(64)
+        if b';' in line:
+            line = line.split(b';', 1)[0]      # chunk;ext=...
+        try:
+            return int(line.strip(), 16)
+        except ValueError:
+            raise ValueError('chunk')
+
+    def read(self, n=CHUNK):
+        if self.done:
+            return b''
+        if self.chunked:
+            while self.left <= 0:
+                size = self._chunk_size()
+                if size == 0:                  # koniec: traily do CRLF
+                    self.done = True
+                    while True:
+                        t = self.rfile.readline(1024)
+                        if t in (b'\r\n', b'\n', b''):
+                            break
+                    return b''
+                self.left = size
+            b = self.rfile.read(min(n, self.left))
+            if not b:                          # klient uciął połączenie
+                self.done = True
+                return b''
+            self.left -= len(b)
+            self.total += len(b)
+            if self.left == 0:
+                self.rfile.read(2)             # CRLF za chunkem
+        else:
+            b = self.rfile.read(min(n, self.left))
+            if not b:
+                self.done = True
+            self.left -= len(b)
+        if self.total > self.limit:
+            raise ValueError('size')
+        return b
+
+
+def _pump_multipart(body, boundary, on_part, on_data):
+    """Rozbija multipart strumieniowo. Woła on_part(head) i on_data(bytes).
+
+    Nie budujemy listy części — to był właśnie powód, dla którego duże filmy
+    wywracały całe żądanie. Maszyna stanów poniżej ma jeden warunek: `step`
+    robi JEDEN krok i mowi, czy sie posunela. Petla nizej wykonuje kroki
+    az dojdzie do stanu, w ktorym potrzebuje wiecej danych — inaczej caly
+    request miescil sie w jednym `read()` i parser konczyl po pierwszej
+    czesci, reszte zjadajac po cichu.
+    """
+    delim = b'\r\n--' + boundary
+    first = b'--' + boundary
+    buf = bytearray()
+    state = 'preamble'
+    part_open = False
+
+    def step():
+        """Jeden krok maszyny stanow. True = posuwamy sie dalej."""
+        nonlocal state, part_open
+        if state == 'preamble':
+            i = buf.find(first)
+            if i < 0:
+                if len(buf) > len(first):       # nieprzeczytany poczatek
+                    del buf[:-len(first)]
+                return False
+            del buf[:i + len(first)]
+            state = 'after'
+            part_open = True
+            return True
+        if state == 'after':
+            if buf.startswith(b'--'):           # '--boundary--' = koniec
+                state = 'end'
+                return True
+            if buf.startswith(b'\r\n'):
+                del buf[:2]
+                state = 'head'
+                return True
+            if len(buf) < 2:
+                return False
+            state = 'end'
+            return True
+        if state == 'head':
+            i = buf.find(b'\r\n\r\n')
+            if i < 0:
+                if len(buf) > 16384:            # naglowek dluzszy niz 16 kB
+                    state = 'end'
+                    return True
+                return False
+            on_part(bytes(buf[:i]).decode('utf-8', 'replace'))
+            del buf[:i + 4]
+            state = 'data'
+            return True
+        if state == 'data':
+            i = buf.find(delim)
+            if i < 0:
+                keep = len(delim) - 1
+                if len(buf) > keep:             # zostawiamy koniec na pozniej
+                    on_data(bytes(buf[:-keep]))
+                    del buf[:-keep]
+                return False
+            # delim zaczyna sie CRLF, wiec buf[:i] to juz same dane
+            on_data(bytes(buf[:i]))
+            del buf[:i + len(delim)]
+            state = 'after'
+            part_open = False
+            return True
+        return False
+
+    while True:
+        chunk = body.read()
+        if chunk:
+            buf.extend(chunk)
+        while step():
+            if state == 'end':
+                return part_open
+        if not chunk:
+            break
+    return part_open
+
+
+def _safe_name(raw):
+    """Nazwa z Content-Disposition bywa śmieciem: ścieżka, '..', znaki sterujące.
+
+    Przepuszczanie nazwy prosto do os.path.join to klasyka: '..' wskazywało
+    katalog nadrzędny, a '\\' na Windowsie rozdzielał ścieżkę.
+    """
+    raw = (raw or '').replace('\\', '/').split('/')[-1]
+    raw = re.sub(r'[\x00-\x1f\x7f<>:"|?*]', '_', raw)
+    raw = raw.strip().rstrip('.')            # Windows nie lubi kropki z konca
+    if raw in ('', '.', '..'):
+        raw = 'foto'
+    return raw[:120]
+
+
+def _lan_ips(port, token):
+    """Adresy, pod ktorymi telefon naprawde dojdzie do komputera.
+
+    `gethostbyname(gethostname())` zwraca na Windowsie czesto 127.0.1.1 albo
+    adres karty Hyper-V/WSL/VPN — telefon taki adres nie otworzy. Dlatego
+    zbieramy wszystkie adresy, odrzucamy loopback, link-local i multicast,
+    a najpierw pokazujemy te z sieci domowej.
+    """
+    found = []
+
+    def add(ip):
+        if not ip or ip in found:
+            return
+        if ip.startswith(('127.', '169.254.', '224.', '239.', '0.')):
+            return
+        try:
+            octets = socket.inet_aton(ip).split(b'.')
+        except OSError:
+            return
+        if octets[0] == b'\xff':             # 255.x.x.x = rozgalesnik
+            return
+        found.append(ip)
+
+    # 1) gniazdo UDP na zewnatrz: kernelowi nie trzeba wysylac pakietu,
+    #    wiec dziala tez bez internetu i mowi nam, ktorym adresem wyjdziemy
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(('192.0.2.1', 9))    # zarezerwany, nieosiagalny
+            add(s.getsockname()[0])
+        finally:
+            s.close()
+    except OSError:
+        pass
+    # 2) wszystkie adresy, ktore system zna pod swoja nazwa
+    try:
+        host = socket.gethostname()
+        for info in socket.getaddrinfo(host, None, socket.AF_INET):
+            add(info[4][0])
+    except OSError:
+        pass
+    # 3) awaryjnie nazwa domenowa (czesto jedyna znana w sieci korporacyjnej)
+    if not found:
+        try:
+            add(socket.gethostbyname(socket.getfqdn()))
+        except OSError:
+            pass
+
+    def rank(ip):
+        if ip.startswith('192.168.') or ip.startswith('10.'):
+            return 0
+        if ip.startswith('172.') and 16 <= int(ip.split('.')[1] or 0) <= 31:
+            return 0
+        return 1
+
+    found.sort(key=rank)
+    return [f'http://{ip}:{port}/?t={token}' for ip in found]
+
+
 def start_phone_server(on_files, port=8765):
-    """Uruchamia lokalny serwer i zwraca (server, token, url).
+    """Uruchamia lokalny serwer i zwraca (server, token, urls).
 
     Token w adresie chroni przed przypadkowym wysłaniem plikow przez
     inna aplikacje w sieci lokalnej — to zabezpieczenie, nie logowanie.
+    Sprawdzany jest przy GET *oraz* przy POST: samo trzymanie go w adresie
+    strony chroni tylko przed otwarciem strony, nie przed wysłaniem plikow.
     Zero zaleznosci: wbudowany http.server.
     """
+    import hmac
     import http.server
+    import json
     import socketserver
     import secrets
     import threading
@@ -1848,78 +2155,180 @@ def start_phone_server(on_files, port=8765):
     token = secrets.token_urlsafe(9)
 
     class H(http.server.BaseHTTPRequestHandler):
+        # DUZY upload: domyslne 60 s to za malo dla filmu z telefonu
+        protocol_version = 'HTTP/1.1'
+        timeout = 900
+
         def log_message(self, *a):        # milczenie w konsoli
             pass
 
+        def handle_one_request(self):
+            # Telefon na slabszym WiFi potrafi zniknac w polowcie zdania
+            # (zablokowany ekran, zmiana sieci). Wbudowany http.server wywala
+            # wtedy traceback na konsolę, a to wyglada jak awaria programu.
+            try:
+                super().handle_one_request()
+            except (ConnectionAbortedError, ConnectionResetError,
+                    BrokenPipeError, TimeoutError):
+                self.close_connection = True
+
         def _send(self, code, body, ctype='text/html; charset=utf-8'):
-            self.send_response(code)
-            self.send_header('Content-Type', ctype)
-            self.send_header('Content-Length', str(len(body)))
-            self.send_header('Cache-Control', 'no-store')
-            self.send_header('X-Content-Type-Options', 'nosniff')
-            self.end_headers()
-            self.wfile.write(body)
+            if isinstance(body, str):
+                body = body.encode('utf-8')
+            try:
+                self.send_response(code)
+                self.send_header('Content-Type', ctype)
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('X-Content-Type-Options', 'nosniff')
+                self.end_headers()
+                self.wfile.write(body)
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                # telefon zamknal karta / wszedl w tlo w trakcie wysylki.
+                # To nie blad serwera — bez tego traceback miesci w konsole.
+                pass
+
+        def _token_ok(self, given):
+            return hmac.compare_digest((given or '').encode('utf-8'),
+                                       token.encode('utf-8'))
 
         def do_GET(self):
             u = urllib.parse.urlparse(self.path)
             q = urllib.parse.parse_qs(u.query)
-            if u.path in ('/', '/i') and q.get('t', [''])[0] == token:
+            if u.path in ('/', '/i') and self._token_ok(q.get('t', [''])[0]):
                 self._send(200, PHONE_PAGE.encode())
             else:
                 self._send(404, 'Nie. Otwórz link z programu.'.encode())
 
         def do_POST(self):
-            if urllib.parse.urlparse(self.path).path != '/upload':
-                return self._send(404, b'nope')
-            n = int(self.headers.get('Content-Length') or 0)
-            if n <= 0 or n > 200 * 1024 * 1024:
-                return self._send(413, b'za duzy')
+            u = urllib.parse.urlparse(self.path)
+            if u.path != '/upload':
+                return self._send(404, b'nope', 'text/plain; charset=utf-8')
+            # token z naglowka (strona go wysyla) albo z zapytania — oba
+            # sprawdzamy, bo strona moze byc stara i token wchodzi w query
+            given = self.headers.get('X-Photoscrub-Token') \
+                or urllib.parse.parse_qs(u.query).get('t', [''])[0]
+            if not self._token_ok(given):
+                return self._send(403, json.dumps(
+                    {'error': 'zly klucz — otworz link z programu'}).encode(),
+                    'application/json')
+
             ctype = self.headers.get('Content-Type', '')
-            m = re.search(r'boundary=([^;]+)', ctype)
+            m = re.search(r'boundary=("?)([^";,]+)\1', ctype)
             if not m:
-                return self._send(400, b'brak boundary')
-            raw = self.rfile.read(n)
-            parts = raw.split(('--' + m.group(1)).encode())
-            dest = None
-            names = []
-            for part in parts:
-                if b'\r\n\r\n' not in part:
-                    continue
-                head, _, body = part.partition(b'\r\n\r\n')
-                head = head.decode('utf-8', 'replace')
-                fn = re.search(r'filename="([^"]*)"', head)
-                tk = re.search(r'name="token"\r\n\r\n([^\r]*)', head)
-                if tk:
-                    continue
-                if not fn or not fn.group(1):
-                    continue
-                data = body.rsplit(b'\r\n', 1)[0]
-                if not data:
-                    continue
-                if dest is None:
-                    dest = on_files()
-                    if not dest:
-                        return self._send(500, b'brak folderu')
-                safe = os.path.basename(fn.group(1)).replace('/', '_') or 'foto'
+                return self._send(400, b'brak boundary',
+                                  'text/plain; charset=utf-8')
+            boundary = m.group(2).strip().encode('utf-8')
+            if not boundary or len(boundary) > 200:
+                return self._send(400, b'zly boundary',
+                                  'text/plain; charset=utf-8')
+
+            state = {'fh': None, 'path': None, 'size': 0, 'names': [],
+                     'total': 0}
+
+            def on_part(head):
+                state['fh'] = None
+                state['size'] = 0
+                fn = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";\r\n]*)"?',
+                               head)
+                field = re.search(r'name="([^"]*)"', head)
+                if not fn:
+                    return                        # pole zwykłe (np. token)
+                # pusta nazwa bywa u przegladarki, gdy plik nie ma tytulu
+                # (chmura, "zdjecie" bez nazwy). Wtedy robimy "foto", bo
+                # inaczej uzytkownik widzi "brak plikow" mimo ze cos
+                # zaznaczyl.
+                raw = fn.group(1).strip()
+                if not raw and (not field or field.group(1) == 'f'):
+                    raw = 'foto'
+                if not raw:
+                    return
+                safe = _safe_name(raw)
+                dest = on_files()
+                if not dest:
+                    raise ValueError('brak folderu')
                 p = os.path.join(dest, safe)
                 i = 1
                 while os.path.exists(p):
                     stem, ext = os.path.splitext(safe)
                     p = os.path.join(dest, f'{stem}_{i}{ext}')
                     i += 1
-                with open(p, 'wb') as f:
-                    f.write(data)
-                names.append(os.path.basename(p))
-            if not names:
-                return self._send(400, b'brak plikow')
-            import json
+                state['path'] = p
+                state['fh'] = open(p, 'wb')
+
+            def on_data(b):
+                if not b or state['fh'] is None:
+                    return
+                state['size'] += len(b)
+                state['total'] += len(b)
+                if state['total'] > MAX_UPLOAD:
+                    raise ValueError('za duzo')
+                state['fh'].write(b)
+
+            def close_part():
+                if state['fh'] is None:
+                    return
+                state['fh'].close()
+                if state['size']:
+                    state['names'].append(os.path.basename(state['path']))
+                else:
+                    try:
+                        os.remove(state['path'])   # pusta część = śmieć
+                    except OSError:
+                        pass
+                state['fh'] = None
+
+            orig_part, orig_data = on_part, on_data
+
+            def part_wrapped(head):
+                close_part()
+                orig_part(head)
+
+            def data_wrapped(b):
+                try:
+                    orig_data(b)
+                except ValueError:
+                    close_part()
+                    raise
+
+            try:
+                body = _Body(self.rfile, self.headers)
+                _pump_multipart(body, boundary, part_wrapped, data_wrapped)
+                close_part()
+            except ValueError as e:
+                close_part()
+                code = str(e)
+                if code == 'brak folderu':
+                    return self._send(500, json.dumps(
+                        {'error': 'brak folderu docelowego'}).encode(),
+                        'application/json')
+                if code in ('size', 'za duzo'):
+                    msg, st = 'plik za duży — limit to 512 MB', 413
+                elif code == 'empty':
+                    msg, st = 'puste żądanie — wybierz pliki', 400
+                else:
+                    msg, st = 'nie udało się odczytać wysyłki', 400
+                return self._send(st, json.dumps({'error': msg}).encode(),
+                                  'application/json')
+            except Exception:
+                close_part()
+                return self._send(400, json.dumps(
+                    {'error': 'przerwane wysyłanie'}).encode(),
+                    'application/json')
+
+            if not state['names']:
+                return self._send(400, json.dumps(
+                    {'error': 'brak plikow — wybierz zdjecia w galerii'}).encode(),
+                    'application/json')
             self._send(200, json.dumps(
-                {'saved': len(names), 'files': names}).encode(),
+                {'saved': len(state['names']), 'files': state['names']}).encode(),
                 'application/json')
 
     class S(socketserver.ThreadingTCPServer):
         allow_reuse_address = True
         daemon_threads = True
+        # duze pliki + wiecej niz jeden telefon naraz
+        request_queue_size = 16
 
     # IPv4 wazne: na Linuksie 'localhost' bywa IPv6 i wtedy telefon/adres
     # z IP sieciowego nie trafia w to samo gniazdo.
@@ -1937,13 +2346,7 @@ def start_phone_server(on_files, port=8765):
             time.sleep(0.05)
 
     # adresy do wyswietlenia — laptop po WiFi ma inny IP niz 127.0.0.1
-    urls = []
-    try:
-        ip = socket.gethostbyname(socket.gethostname())
-        if not ip.startswith('127.'):
-            urls.append(f'http://{ip}:{port}/?t={token}')
-    except Exception:
-        pass
+    urls = _lan_ips(port, token)
     urls.append(f'http://127.0.0.1:{port}/?t={token}')
     return srv, token, urls
 
