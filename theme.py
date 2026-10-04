@@ -158,3 +158,87 @@ SHADOW_3 = ('0 0 0 1px #696e77, 0 2px 3px -2px #00000026, 0 3px 8px -2px '
             '#0000003d, 0 4px 12px -4px #00000042')
 SHADOW_4 = ('0 0 0 1px #696e77, 0 8px 40px #00000026, 0 12px 32px -16px '
             '#0000003d')
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  MOTYW JASNY — Radix Colors light.ts (realne hexy, te same zrodla)
+# ═══════════════════════════════════════════════════════════════════════════
+_L = {
+    'slate': ['fcfcfd', 'f9f9fb', 'f0f0f3', 'e8e8ec', 'e0e1e6', 'd9d9e0',
+              'cdced6', 'b9bbc6', '8b8d98', '80838d', '60646c', '1c2024'],
+    'indigo': ['fdfdfe', 'f7f9ff', 'edf2fe', 'e1e9ff', 'd2deff', 'c1d0ff',
+               'abbdf9', '8da4ef', '3e63dd', '3358d4', '3a5bc7', '1f2d5c'],
+    'red': ['fffcfc', 'fff7f7', 'feebec', 'ffdbdc', 'ffcdce', 'fdbdbe',
+            'f4a9aa', 'eb8e90', 'e5484d', 'dc3e42', 'ce2c31', '641723'],
+    'amber': ['fefdfb', 'fefbe9', 'fff7c2', 'ffee9c', 'fbe577', 'f3d673',
+              'e9c162', 'e2a336', 'ffc53d', 'ffba18', 'ab6400', '4f3422'],
+    'green': ['fbfefc', 'f4fbf6', 'e6f6eb', 'd6f1df', 'c4e8d1', 'adddc0',
+              '8eceaa', '5bb98b', '30a46c', '2b9a66', '218358', '193b2d'],
+}
+_LA = {
+    'slate': {3: '0000330f', 5: '0009321f', 8: '00083046', 10: '00071b7f'},
+    'indigo': {3: '0047f112', 5: '0044ff2d', 8: '0034dc72', 10: '002ec9cc'},
+    'red': {3: 'f3000d14', 5: 'ff000632', 8: 'd2000571', 10: 'd10005c1'},
+    'amber': {3: 'ffde003d', 5: 'f8cf0088', 8: 'da8a00c9', 10: 'ffb300e7'},
+    'green': {3: '00a43319', 5: '019c393b', 8: '00924ba4', 10: '008647d4'},
+}
+
+
+def light_tokens():
+    """Zwraca ten sam zestaw tokenow co ciemny motyw, ale dla jasnego.
+
+    Te same semantyczne nazwy (background, card, primary, border, ring) —
+    dzieki temu QSS jest jeden dla obu motywow, a zmiana to podmiana
+    wartosci, nie drugi arkusz stylow do utrzymania.
+    """
+    def h(c, i):
+        return '#' + _L[c][i]
+
+    def a(c, i):
+        return rgba(_L[c][i] + 'ff', int(_LA[c][i][6:8], 16) / 255)
+
+    return {
+        'BG': h('slate', 0),
+        'FG': h('slate', 11),
+        'FG_MUTED': h('slate', 10),
+        'FG_SUBTLE': h('slate', 9),
+        'PANEL': '#ffffff',
+        'PANEL_2': h('slate', 2),
+        'PANEL_3': h('slate', 3),
+        'POPOVER': '#ffffff',
+        'ACCENT': h('indigo', 8),
+        'ACCENT_HOVER': h('indigo', 9),
+        'ACCENT_FG': '#ffffff',
+        'ACCENT_SOFT': a('indigo', 3),
+        'BORDER': a('slate', 5),
+        'BORDER_STRONG': a('slate', 8),
+        'RING': h('indigo', 7),
+        'DANGER': h('red', 9),
+        'DANGER_SOFT': a('red', 3),
+        'DANGER_LINE': a('red', 8),
+        'WARN': h('amber', 9),
+        'WARN_SOFT': a('amber', 3),
+        'OK': h('green', 9),
+        'OK_SOFT': a('green', 3),
+        # miniaturka jest obrazem — w jasnym motywie tlo musi byc jasne,
+        # inaczej karty maja czarne kwadraty
+        'THUMB': h('slate', 2),
+    }
+
+
+def dark_tokens():
+    """Ciemny motyw w tej samej formie co light_tokens()."""
+    return {
+        'BG': BG, 'FG': FG, 'FG_MUTED': FG_MUTED, 'FG_SUBTLE': FG_SUBTLE,
+        'PANEL': PANEL, 'PANEL_2': PANEL_2, 'PANEL_3': PANEL_3,
+        'POPOVER': POPOVER, 'ACCENT': ACCENT, 'ACCENT_HOVER': ACCENT_HOVER,
+        'ACCENT_FG': ACCENT_FG, 'ACCENT_SOFT': ACCENT_SOFT,
+        'BORDER': BORDER, 'BORDER_STRONG': BORDER_STRONG, 'RING': RING,
+        'DANGER': DANGER, 'DANGER_SOFT': DANGER_SOFT,
+        'DANGER_LINE': DANGER_LINE, 'WARN': WARN, 'WARN_SOFT': WARN_SOFT,
+        'OK': OK, 'OK_SOFT': OK_SOFT,
+        'THUMB': '#0b0b0c',
+    }
+
+
+THEMES = {'dark': dark_tokens, 'light': light_tokens}

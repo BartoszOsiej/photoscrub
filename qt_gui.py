@@ -7,7 +7,11 @@ i nie zna skali ekranu na Waylandzie (stąd „wszystko krzywe"). Qt ma oba rozw
 od samego początku, do tego prawdziwe style, własny drag&drop i poprawne skalowanie.
 """
 import os
+import re
+import socket
 import sys
+import threading
+import time
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -15,10 +19,11 @@ import license as lic
 import model as mdl
 import photoscrub as ps
 import ruleset as rs
+import theme as T
 
 # Wszystkie wartosci ponizej pochodza z theme.py, a theme.py z realnych
 # tokenow Radix Themes / Radix Colors / shadcn (dark). Zadne liczby "na oko".
-QSS = """
+_QSS_TEMPLATE = """
 /* ── baza: Radix typography (base 14px = Text size 2) ── */
 QWidget {{
     background:{bg};
@@ -110,7 +115,7 @@ QFrame#card:hover {{ border-color:{line_strong}; background:{panel2}; }}
 QFrame#card[worst="true"] {{ border-color:{danger_line}; }}
 QFrame#card[sel="true"] {{ border-color:{accent}; background:{accent_soft}; }}
 
-QLabel#thumb {{ background:#0b0b0c; border-radius:{r_sm}px; }}
+QLabel#thumb {{ background:{thumb}; border-radius:{r_sm}px; }}
 QLabel#cardName {{ font-size:12px; color:{fg}; }}
 QLabel#cardBadge {{ font-size:12px; font-weight:600; }}
 QLabel#cardRisk {{ font-size:12px; font-weight:600;
@@ -187,26 +192,6 @@ QTextEdit:focus, QLineEdit:focus {{ border-color:{ring}; }}
 QLabel#hint {{ font-size:12px; color:{faint}; }}
 QLabel#dlgTitle {{ font-size:24px; font-weight:600; letter-spacing:-0.00625em; }}
 """
-
-# Wygodne aliasy — jedyne miejsce, gdzie kolory są mapowane na nazwy
-# używane w kodzie. Wartości z theme.py (Radix Colors dark / shadcn).
-import theme as T
-
-BG = T.BG
-PANEL = T.PANEL
-PANEL2 = T.PANEL_2
-PANEL3 = T.PANEL_3
-LINE = T.BORDER
-FG = T.FG
-FG2 = T.FG_MUTED
-DIM = T.FG_MUTED
-FAINT = T.FG_SUBTLE
-ACC = T.ACCENT
-RED = T.DANGER
-AMB = T.WARN
-GRN = T.OK
-WARN = T.WARN
-
 
 CARD_W = 228   # stal szerokosc karty: kolumny liczone dokladnie, bez
                # zgadywania i bez obcinania prawej kolumny
@@ -462,35 +447,39 @@ class Toast(QtWidgets.QFrame):
     def __init__(self, parent):
         super().__init__(parent)
         self.setObjectName('toast')
+        # pusty layout tworzony RAZ. Wczesniej kazde show_toast() robilo
+        # nowy QHBoxLayout(self) na widgete, ktory juz layout mial — Qt
+        # krzyczal "already has a layout" i drugi layout byl mieszany.
+        self._lay = QtWidgets.QHBoxLayout(self)
+        self._lay.setContentsMargins(0, 0, 16, 0)
+        self._bar = QtWidgets.QFrame()
+        self._bar.setFixedWidth(3)
+        self._lay.addWidget(self._bar)
+        self._box = QtWidgets.QVBoxLayout()
+        self._box.setContentsMargins(16, 12, 0, 12)
+        self._box.setSpacing(2)
+        self._lay.addLayout(self._box, 1)
         self._timer = QtCore.QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.hide)
         self.hide()
 
     def show_toast(self, title, body='', kind='info', ms=4600):
-        while self.layout() and self.layout().count():
-            it = self.layout().takeAt(0)
+        while self._box.count():
+            it = self._box.takeAt(0)
             if it.widget():
                 it.widget().deleteLater()
         col = {'info': ACC, 'ok': GRN, 'warn': AMB, 'err': RED}[kind]
-        h = QtWidgets.QHBoxLayout(self)
-        h.setContentsMargins(0, 0, 16, 0)
-        bar = QtWidgets.QFrame()
-        bar.setFixedWidth(3)
-        bar.setStyleSheet(f'background:{col}; border-radius:2px;')
-        h.addWidget(bar)
-        box = QtWidgets.QVBoxLayout()
-        box.setContentsMargins(16, 12, 0, 12)
-        box.setSpacing(2)
+        self._bar.setStyleSheet(f'background:{col}; border-radius:2px;')
         t = QtWidgets.QLabel(title)
         t.setObjectName('toastTitle')
-        box.addWidget(t)
+        self._box.addWidget(t)
         if body:
             b = QtWidgets.QLabel(body)
             b.setObjectName('toastBody')
             b.setWordWrap(True)
-            box.addWidget(b)
-        h.addLayout(box, 1)
+            self._box.addWidget(b)
+        self.adjustSize()
         self.show()
         self.raise_()
         self._timer.start(ms)
@@ -556,6 +545,42 @@ def findings_groups(rep):
     return [(k, buckets[k]) for k in order]
 
 
+class _ScrollFilter(QtCore.QObject):
+    """Filtr zdarzen kola myszy i gestow touchpada.
+
+    Trzyma sie zasady: przewijamy strone kart tym samym filtrem, niezaleznie
+    od tego, gdzie jest kursor (karta, panel, tlo). Skoki sa krotkie
+    (1 kolko = ~1/3 strony), zeby nie przewijac na wylot.
+    """
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.win = win
+
+    def eventFilter(self, obj, ev):
+        if ev.type() != QtCore.QEvent.Wheel:
+            return False
+        if self.win.stack.currentWidget() is not self.win.scroll:
+            return False      # na ekranie startowym scroll niepotrzebny
+        bar = self.win.scroll.verticalScrollBar()
+        if bar.maximum() <= 0:
+            return True      # nic do przewijania — zdarzenie zjedzone
+
+        delta = 0
+        if ev.angleDelta().y():
+            delta = ev.angleDelta().y()
+        elif ev.pixelDelta().y():
+            # gest touchpada: 1 "krok" ~ 40 px, minimum 12 px zeby
+            # plynny, minimalny ruch nie byl niewidoczny
+            delta = ev.pixelDelta().y() * 120 / 40
+        if delta == 0:
+            return True
+
+        bar.setValue(bar.value() - int(delta))
+        ev.accept()
+        return True
+
+
 class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -569,6 +594,11 @@ class Window(QtWidgets.QMainWindow):
         self._thumbs = {}
         self.selected = None
         self.ruleset = rs.CURRENT
+        self._clean_abort = False
+        self._cleaner = None
+        self._cancel = None
+        self._phone_srv = None
+        self._phone_dir = None
         self._cards = {}
         self._last_w = self.width()
         self._recol_busy = False
@@ -679,6 +709,9 @@ class Window(QtWidgets.QMainWindow):
 
         foot = QtWidgets.QHBoxLayout()
         foot.setSpacing(16)
+        self.foot_extra = QtWidgets.QHBoxLayout()
+        self.foot_extra.setSpacing(8)
+        foot.addLayout(self.foot_extra)
         self.cta = QtWidgets.QPushButton('Usuń metadane')
         self.cta.setProperty('variant', 'solid')
         self.cta.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
@@ -704,6 +737,7 @@ class Window(QtWidgets.QMainWindow):
         # Pasek menu ma byc niewidoczny — aplikacja nie ma pliku, a skroty
         # i tak sa w menu kontekstowym oraz w tooltipach.
         self.menuBar().setVisible(False)
+        self._install_scroll_filter()
         QtCore.QTimer.singleShot(120, self._gate)
 
     # ── naglowek ──────────────────────────────────────────────────────────────
@@ -737,7 +771,7 @@ class Window(QtWidgets.QMainWindow):
         h.addStretch(1)
 
         for text, slot, key in (('Wybierz folder', self.add_folder,
-                                 'Ctrl+D'),
+                                 'Ctrl+Shift+D'),
                                 ('Dodaj pliki', self.add_files, 'Ctrl+O')):
             b = QtWidgets.QPushButton(text)
             b.setProperty('variant', 'ghost')
@@ -747,6 +781,22 @@ class Window(QtWidgets.QMainWindow):
             b.setToolTip(f'{text} ({key})')
             h.addWidget(b)
         h.addSpacing(4)
+        self._theme_name = 'dark'
+        self._theme_btn = QtWidgets.QPushButton()
+        self._theme_btn.setProperty('variant', 'ghost')
+        self._theme_btn.setFixedWidth(36)
+        self._theme_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self._theme_btn.setToolTip('Jasny / ciemny motyw (Ctrl+T)')
+        self._theme_btn.clicked.connect(self.toggle_theme)
+        h.addWidget(self._theme_btn)
+        self._paint_theme_icon()
+
+        phone = QtWidgets.QPushButton('Z telefonu')
+        phone.setProperty('variant', 'ghost')
+        phone.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        phone.setToolTip('Wyslij zdjecia z iPhone albo Androida (Ctrl+M)')
+        phone.clicked.connect(self._from_phone)
+        h.addWidget(phone)
         about = QtWidgets.QPushButton('?')
         about.setProperty('variant', 'ghost')
         about.setFixedWidth(32)
@@ -754,6 +804,33 @@ class Window(QtWidgets.QMainWindow):
         about.clicked.connect(self._about)
         h.addWidget(about)
         return h
+
+    # ── scroll: gesty touchpada + kolo myszy ──────────────────────────────
+    def _install_scroll_filter(self):
+        """Poprawne przewijanie dla myszy I touchpada.
+
+        Problem: Qt wysyla gesty touchpada jako pixelDelta (dokladne
+        przesuniecie w pikselach), a QScrollArea reaguje glownie na
+        angleDelta. Na Waylandzie przez XWayland dwa palce potrafily dawac
+        "zero reakcji" albo przeskakiwane o pelna strone. Ten filtr
+        sprowadza oba rodzaje zdarzen do jednej sciezki i przyciemnione
+        strony, zeby przewijalo sie plynnie.
+        """
+        self._scroll_filter = _ScrollFilter(self)
+        self.installEventFilter(self._scroll_filter)
+
+        # ten sam filtr na scroll area i jego viewport — kolo musi dzialac
+        # takze wtedy, gdy kursor jest na karcie, a nie na tle
+        for wid in (self.scroll, self.scroll.viewport()):
+            wid.installEventFilter(self._scroll_filter)
+        self.scroll.verticalScrollBar().installEventFilter(self._scroll_filter)
+        self.scroll.horizontalScrollBar().installEventFilter(self._scroll_filter)
+
+        # krótsze skoki (3 linie zamiast 3*? domyslnej) + pełna strona
+        sb = self.scroll.verticalScrollBar()
+        sb.setSingleStep(24)
+        sb.setPageStep(max(120, self.scroll.viewport().height() - 24))
+        self.scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
 
     # ── menu glowne (F10) + skroty (GNOME guidelines/keyboard) ────────────
     def _build_menu(self):
@@ -767,7 +844,7 @@ class Window(QtWidgets.QMainWindow):
         a = f.addAction('Dodaj pliki...', self.add_files)
         a.setShortcut('Ctrl+O')
         a = f.addAction('Wybierz folder...', self.add_folder)
-        a.setShortcut('Ctrl+D')
+        a.setShortcut('Ctrl+Shift+D')
         f.addSeparator()
         f.addAction('Zamknij', self.close).setShortcut('Ctrl+Q')
         sm = m.addMenu('&Akcje')
@@ -777,6 +854,8 @@ class Window(QtWidgets.QMainWindow):
         a = sm.addAction('Usun metadane', self.clean)
         a.setShortcut('Ctrl+E')
         sm.addSeparator()
+        sm.addAction('Zdjecia z telefonu', self._from_phone).setShortcut('Ctrl+M')
+        sm.addAction('Przelacz motyw', self.toggle_theme).setShortcut('Ctrl+T')
         sm.addAction('Jak to dziala', self._about).setShortcut('F1')
         return m
 
@@ -1105,6 +1184,10 @@ class Window(QtWidgets.QMainWindow):
 
         vw = self.scroll.viewport().width() or (self.width() - 480)
         gap = 16
+        # nowe karty musza dziedziczyc filtr scrolla, inaczej gest
+        # touchpada nad karta nie przewija listy
+        for card in list(self._cards.values()):
+            card.installEventFilter(self._scroll_filter)
         # ile kolumn REALNIE sie zmiesci — nie "na oko", tylko dzielenie
         cols = max(2, min(6, int((vw + gap) // (CARD_W + gap))))
         self._cols = cols
@@ -1182,6 +1265,209 @@ class Window(QtWidgets.QMainWindow):
         self.detail.setHtml(''.join(parts))
         self.detail.verticalScrollBar().setValue(0)
 
+    # ── motyw jasny / ciemny ────────────────────────────────────────────────
+    def _paint_theme_icon(self):
+        """Ikona przelacznika: ksiezyc (gdy teraz ciemny) / slonce."""
+        import math
+        pm = QtGui.QPixmap(20, 20)
+        pm.fill(QtCore.Qt.transparent)
+        p = QtGui.QPainter(pm)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        c = QtGui.QColor(FG2)
+        p.setPen(QtGui.QPen(c, 1.6))
+        if self._theme_name == 'dark':
+            # pelny ksiegzyc + cien wypelniajacy fzyg
+            p.setBrush(QtCore.Qt.NoBrush)
+            p.drawEllipse(5, 5, 11, 11)
+            p.setBrush(QtGui.QBrush(c))
+            p.drawEllipse(2, 2, 11, 11)
+        else:
+            # slonec: dysk + promienie
+            p.setBrush(QtGui.QBrush(c))
+            p.drawEllipse(6, 6, 8, 8)
+            p.setBrush(QtCore.Qt.NoBrush)
+            for a in range(0, 360, 45):
+                rad = math.radians(a)
+                p.drawLine(QtCore.QPointF(10 + 8.0 * math.cos(rad),
+                                          10 + 8.0 * math.sin(rad)),
+                           QtCore.QPointF(10 + 10.5 * math.cos(rad),
+                                          10 + 10.5 * math.sin(rad)))
+        p.end()
+        self._theme_btn.setIcon(QtGui.QIcon(pm))
+        self._theme_btn.setText('')
+
+    def toggle_theme(self):
+        global QSS, TOKENS, BG, PANEL, PANEL2, PANEL3, LINE, FG, FG2, DIM
+        global FAINT, ACC, RED, AMB, GRN, WARN
+        self._theme_name = 'light' if self._theme_name == 'dark' else 'dark'
+        t = apply_theme(QtWidgets.QApplication.instance(), self._theme_name)
+        QSS = build_qss(t)
+        TOKENS = t
+        # moduly uzywaja globalnych aliasow (kolory etykiet w HTML)
+        BG, PANEL, PANEL2, PANEL3 = t['BG'], t['PANEL'], t['PANEL_2'], \
+            t['PANEL_3']
+        LINE, FG, FG2, DIM, FAINT = (t['BORDER'], t['FG'], t['FG_MUTED'],
+                                     t['FG_MUTED'], t['FG_SUBTLE'])
+        ACC, RED, AMB, GRN, WARN = (t['ACCENT'], t['DANGER'], t['WARN'],
+                                    t['OK'], t['WARN'])
+        self._paint_theme_icon()
+        self._restyle()
+        retheme_window(self, t)
+        self._render()          # karty musza dostac nowe kolory
+        if self.selected:
+            self.show_detail(self.selected, True)
+        self.status.setText(f'Motyw: {"jasny" if self._theme_name == "light" else "ciemny"}')
+        self.status.setStyleSheet(f'color:{t["FG_MUTED"]}')
+
+    def _restyle(self):
+        """Przepuszcza widgety przez polish, zeby nowy QSS do nich dotarl
+        (Qt cache'uje style i sama zmiana arkusza ich nie odswieza)."""
+        for w in self.findChildren(QtWidgets.QWidget):
+            w.style().unpolish(w)
+            w.style().polish(w)
+            w.update()
+        self.update()
+
+    # ── „Z telefonu" ─────────────────────────────────────────────────────────
+    def _from_phone(self):
+        """Serwer lokalny + QR. Telefon otwiera zwykla strone i prosi
+        system o dostep do galerii — bez instalowania aplikacji."""
+        import tempfile
+        self._phone_dir = tempfile.mkdtemp(prefix='photoscrub-z-telefonu-')
+        srv, token, urls = start_phone_server(
+            lambda: self._phone_dir, port=self._phone_port())
+        self._phone_srv = srv
+
+        d = QtWidgets.QDialog(self)
+        d.setWindowTitle('Wyślij zdjęcia z telefonu')
+        d.setModal(True)
+        d.setFixedWidth(480)
+        v = QtWidgets.QVBoxLayout(d)
+        v.setContentsMargins(24, 24, 24, 24)
+        v.setSpacing(12)
+
+        t = QtWidgets.QLabel('Wyślij zdjęcia z telefonu')
+        t.setObjectName('dlgTitle')
+        v.addWidget(t)
+        sub = QtWidgets.QLabel(
+            'Telefon otworzy zwykłą stronę i sam poprosi o dostęp do '
+            'galerii. Nic nie wychodzi poza twoją sieć domową.')
+        sub.setObjectName('subtitle')
+        sub.setWordWrap(True)
+        v.addWidget(sub)
+
+        qr = QtWidgets.QLabel()
+        qr.setAlignment(QtCore.Qt.AlignCenter)
+        v.addWidget(qr)
+        self._qr_pixmap(urls[0])
+        qr.setPixmap(self._qr)
+
+        self._phone_link = QtWidgets.QLabel(urls[0].replace('?t=', '  klucz: ')
+                                            .replace('http://', ''))
+        self._phone_link.setObjectName('hint')
+        self._phone_link.setTextInteractionFlags(
+            QtCore.Qt.TextSelectableByMouse)
+        self._phone_link.setAlignment(QtCore.Qt.AlignCenter)
+        self._phone_link.setWordWrap(True)
+        v.addWidget(self._phone_link)
+
+        self._phone_status = QtWidgets.QLabel('Czekam na pliki z telefonu…')
+        self._phone_status.setObjectName('subtitle')
+        self._phone_status.setAlignment(QtCore.Qt.AlignCenter)
+        v.addWidget(self._phone_status)
+
+        row = QtWidgets.QHBoxLayout()
+        row.setSpacing(8)
+        copy = QtWidgets.QPushButton('Kopiuj link')
+        copy.clicked.connect(
+            lambda: QtWidgets.QApplication.clipboard().setText(urls[0]))
+        row.addWidget(copy)
+        row.addStretch(1)
+        scan = QtWidgets.QPushButton('Skanuj teraz')
+        scan.setProperty('variant', 'solid')
+        scan.clicked.connect(self._scan_phone)
+        row.addWidget(scan)
+        v.addLayout(row)
+
+        hint = QtWidgets.QLabel(
+            'Telefon i komputer muszą być w tej samej sieci Wi-Fi. '
+            'Link działa tylko na twoim komputerze — klucz w adresie '
+            'chroni przed wysłaniem plików przez inne programy w sieci.')
+        hint.setObjectName('hint')
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+
+        # sprawdzamy co 2 s czy telefon cos przeslal
+        self._phone_timer = QtCore.QTimer(d)
+        self._phone_timer.timeout.connect(self._phone_poll)
+        self._phone_timer.start(2000)
+        d.exec()
+
+        self._phone_timer.stop()
+        try:
+            srv.shutdown()
+        except Exception:
+            pass
+        self._scan_phone()
+
+    @staticmethod
+    def _phone_port():
+        # port 8765, kolejne wolne przy kolizji
+        import socket
+        for p in range(8765, 8790):
+            with socket.socket() as sk:
+                try:
+                    sk.bind(('127.0.0.1', p))
+                    return p
+                except OSError:
+                    continue
+        return 8765
+
+    def _qr_pixmap(self, url):
+        """Prawdziwy kod QR z qr.py (nasz enkoder, zero zaleznosci).
+
+        Wczesniej byla tu atrapa — wzor liczony z hasha URL. Wygladala jak QR,
+        ale nie skanowala sie. Nie zostawiam czegos, co klamie uzytkownikowi.
+        """
+        import qr as qrmod
+        try:
+            m = qrmod.encode(url, ec_level=1)
+            png = qrmod.to_png_bytes(m, scale=8, border=4)
+            self._qr = QtGui.QPixmap()
+            self._qr.loadFromData(png, 'PNG')
+            if self._qr.isNull():
+                raise ValueError('nie wczytano PNG')
+        except Exception:
+            # lepszy brak kodu niz klamliwy — link jest pokazany obok
+            self._qr = QtGui.QPixmap(180, 180)
+            self._qr.fill(QtCore.Qt.transparent)
+            p = QtGui.QPainter(self._qr)
+            p.setPen(QtGui.QColor(FAINT))
+            p.drawText(self._qr.rect(), QtCore.Qt.AlignCenter,
+                       'Skopiuj link')
+            p.end()
+
+    def _phone_poll(self):
+        import glob
+        files = glob.glob(os.path.join(self._phone_dir, '*'))
+        if files:
+            self._phone_status.setText(f'Otrzymano {len(files)} plików — '
+                                       'skanuję teraz')
+            self._phone_status.setStyleSheet(f'color:{GRN}')
+
+    def _scan_phone(self):
+        import glob
+        files = sorted(glob.glob(os.path.join(self._phone_dir, '*')))
+        if not files:
+            return
+        try:
+            for w in self.findChildren(QtWidgets.QDialog):
+                if w.isVisible():
+                    w.accept()
+        except Exception:
+            pass
+        self.add_paths(files)
+
     # ── czyszczenie ───────────────────────────────────────────────────────────
     def _clean_one(self, rep):
         """Czysci pojedynczy plik (menu kontekstowe karty).
@@ -1244,11 +1530,50 @@ class Window(QtWidgets.QMainWindow):
                 'nigdy nie są nadpisywane.', 'err', 7000)
             return
         self.cta.setEnabled(False)
-        self.status.setText('Usuwam…')
+        self.progress.show()
+        self.progress.setValue(0)
+        n = len(dirty)
+        self.status.setText(f'Usuwam… 0/{n}')
         self.status.setStyleSheet(f'color:{DIM}')
-        CleanWorker(dirty, default, self.ruleset, self).run()
+
+        # Anulowanie: okno zostaje responsywne, wiec dajemy userowi wyjscie
+        self._clean_abort = False
+        self._cancel = QtWidgets.QPushButton('Zatrzymaj')
+        self._cancel.setProperty('variant', 'ghost')
+        self._cancel.clicked.connect(self._abort_clean)
+        self.foot_extra.addWidget(self._cancel)
+        self._cancel.show()
+
+        self._cleaner = CleanWorker(dirty, default, self.ruleset, self)
+        self._cleaner.progress.connect(self._on_clean_progress)
+        self._cleaner.finished_ok.connect(self._cleaned)
+        self._cleaner.start()          # ← wątek, nie wątek GUI
+
+    def _abort_clean(self):
+        self._clean_abort = True
+        self._cancel.setEnabled(False)
+        self.status.setText('Zatrzymuję po bieżącym pliku…')
+        self.status.setStyleSheet(f'color:{AMB}')
+
+    def _on_clean_progress(self, done, total):
+        if self._clean_abort:
+            return
+        self.progress.setValue(int(done / max(1, total) * 100))
+        self.status.setText(f'Usuwam… {done}/{total}')
+        self.status.setStyleSheet(f'color:{DIM}')
 
     def _cleaned(self, done, failed, out, freed):
+        self.progress.hide()
+        self.cta.setEnabled(False)
+        if getattr(self, '_cancel', None):
+            self.foot_extra.removeWidget(self._cancel)
+            self._cancel.hide()
+            self._cancel.deleteLater()
+            self._cancel = None
+        aborted = self._clean_abort
+        self._clean_abort = False
+        if aborted:
+            failed = list(failed) + ['zatrzymano przez uzytkownika']
         self.rows = []
         self.selected = None
         self._render()
@@ -1289,28 +1614,248 @@ class ScanWorker(QtCore.QObject):
 
 
 class CleanWorker(QtCore.QThread):
+    """Czyszczenie w PRAWDE w watku, nie w watku GUI.
+
+    Wczesniej robilismy CleanWorker(...).run() bezposrednio — czyli całe
+    czyszczenie leciało w watku interfejsu i okno stalo na 25 s na jedno
+    zdjecie 6000x4000. Teraz .start() plus postep na zywo.
+    """
+
+    progress = QtCore.Signal(int, int)
+    finished_ok = QtCore.Signal(int, list, str, int)
+
     def __init__(self, dirty, out, ruleset, parent):
         super().__init__(parent)
         self.dirty = dirty
         self.out = out
         self.ruleset = ruleset
+        self._lock = threading.Lock()
+        self._done = 0
+        self._freed = 0
+        self._failed = []
+
+    def _one(self, r):
+        """Czysci jeden plik. Wywolywane z wielu watkow."""
+        if r.kind == 'video':
+            return (f'{os.path.basename(r.path)} — wideo (reguły v'
+                    f'{self.ruleset} nie czyścią wideo)'), 0
+        try:
+            dst = ps.safe_dst(r.path, self.out)
+            before = r.size
+            ps.scrub_image(r.path, dst)
+            return None, max(0, before - os.path.getsize(dst))
+        except Exception as e:
+            return f'{os.path.basename(r.path)}: {e}', 0
 
     def run(self):
-        done, failed, freed = 0, [], 0
-        for r in self.dirty:
-            if r.kind == 'video':
-                failed.append(f'{os.path.basename(r.path)} — wideo (reguły v'
-                              f'{self.ruleset} nie czyścią wideo)')
-                continue
-            try:
-                dst = ps.safe_dst(r.path, self.out)
-                before = r.size
-                ps.scrub_image(r.path, dst)
-                done += 1
-                freed += max(0, before - os.path.getsize(dst))
-            except Exception as e:
-                failed.append(f'{os.path.basename(r.path)}: {e}')
-        self.parent()._cleaned(done, failed, self.out, freed)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        total = len(self.dirty)
+        self.progress.emit(0, total)
+        ok = 0
+        # Pillow i zapis plikow odpuszczaja GIL, wiec watki naprawde
+        # przyspieszaja — to nie jest pozorny 'threads'.
+        with ThreadPoolExecutor(max_workers=min(8, max(2, os.cpu_count() or 2))) \
+                as ex:
+            futs = [ex.submit(self._one, r) for r in self.dirty]
+            for f in as_completed(futs):
+                err, freed = f.result()
+                with self._lock:
+                    self._done += 1
+                    self._freed += freed
+                    if err:
+                        self._failed.append(err)
+                    else:
+                        ok += 1
+                    n = self._done
+                self.progress.emit(n, total)
+        self.finished_ok.emit(ok, self._failed, self.out, self._freed)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  „Z telefonu" — telefon prosi o uprawnienie, wybiera zdjęcia w galerii
+#  i wysyła je do programu. Otwiera zwykłą stronę (nie aplikację), więc
+#  działa na iPhone i Android bez instalacji czegokolwiek.
+# ═══════════════════════════════════════════════════════════════════════════
+PHONE_PAGE = """<!doctype html>
+<html lang="pl"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>photoscrub — wyślij zdjęcia</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; flex-direction:column;
+         align-items:center; justify-content:center; gap:24px; padding:24px;
+         background:#111113; color:#edeef0;
+         font-family:'Segoe UI',-apple-system,system-ui,sans-serif; }
+  .card { width:100%; max-width:420px; background:#18191b; border:1px solid rgba(221,234,248,.25);
+          border-radius:16px; padding:24px; }
+  h1 { margin:0 0 4px; font-size:24px; font-weight:600; letter-spacing:-.6px; }
+  p.sub { margin:0 0 20px; color:#b0b4ba; font-size:14px; line-height:20px; }
+  label.btn { display:block; text-align:center; background:#3e63dd; color:#fff;
+              border-radius:10px; padding:14px 16px; font-weight:600; font-size:16px;
+              cursor:pointer; }
+  label.btn:active { background:#5472e4; }
+  input[type=file] { display:none; }
+  #count { margin-top:16px; color:#b0b4ba; font-size:14px; text-align:center; }
+  .ok { color:#30a46c; } .err { color:#e5484d; }
+  #list { margin-top:16px; max-height:220px; overflow:auto; font-size:13px;
+          color:#b0b4ba; font-family:ui-monospace,monospace; }
+  .warn { margin-top:16px; padding:12px; border-radius:10px; font-size:13px;
+          background:rgba(255,197,61,.12); color:#ffc53d; line-height:18px; }
+</style></head><body>
+<div class="card">
+  <h1>Wyślij zdjęcia</h1>
+  <p class="sub">Wybierz pliki w galerii telefonu. Trafią prosto na komputer,
+     bez chmury i bez wysyłania gdziekolwiek.</p>
+  <label class="btn" for="f">Wybierz z galerii</label>
+  <input type="file" id="f" accept="image/*,video/*" multiple>
+  <div id="count">Czekam na pliki…</div>
+  <div id="list"></div>
+  <div class="warn">Zwykłe zdjęcia z telefonu nie mają metadanych EXIF.
+     Jeśli chcesz sprawdzić w oryginale, włącz „Użyj oryginałów” w aplikacji
+     aparatu przed wysłaniem.</div>
+</div>
+<script>
+const f = document.getElementById('f'), c = document.getElementById('count'),
+      l = document.getElementById('list');
+f.onchange = async () => {
+  const files = [...f.files];
+  if (!files.length) return;
+  c.className = ''; c.textContent = 'Wysyłam ' + files.length + ' plików…';
+  l.textContent = '';
+  const fd = new FormData();
+  files.forEach(x => fd.append('f', x, x.name));
+  fd.append('token', new URLSearchParams(location.search).get('t') || '');
+  try {
+    const r = await fetch('/upload', { method:'POST', body: fd });
+    const j = await r.json();
+    if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status));
+    c.className = 'ok';
+    c.textContent = 'Gotowe — ' + j.saved + ' plików na komputerze.';
+    l.textContent = (j.files || []).map(x => '✓ ' + x).join('\n');
+  } catch (e) {
+    c.className = 'err';
+    c.textContent = 'Nie udało się: ' + e.message;
+  }
+};
+</script></body></html>"""
+
+
+def start_phone_server(on_files, port=8765):
+    """Uruchamia lokalny serwer i zwraca (server, token, url).
+
+    Token w adresie chroni przed przypadkowym wysłaniem plikow przez
+    inna aplikacje w sieci lokalnej — to zabezpieczenie, nie logowanie.
+    Zero zaleznosci: wbudowany http.server.
+    """
+    import http.server
+    import socketserver
+    import secrets
+    import threading
+    import urllib.parse
+
+    token = secrets.token_urlsafe(9)
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):        # milczenie w konsoli
+            pass
+
+        def _send(self, code, body, ctype='text/html; charset=utf-8'):
+            self.send_response(code)
+            self.send_header('Content-Type', ctype)
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            u = urllib.parse.urlparse(self.path)
+            q = urllib.parse.parse_qs(u.query)
+            if u.path in ('/', '/i') and q.get('t', [''])[0] == token:
+                self._send(200, PHONE_PAGE.encode())
+            else:
+                self._send(404, 'Nie. Otwórz link z programu.'.encode())
+
+        def do_POST(self):
+            if urllib.parse.urlparse(self.path).path != '/upload':
+                return self._send(404, b'nope')
+            n = int(self.headers.get('Content-Length') or 0)
+            if n <= 0 or n > 200 * 1024 * 1024:
+                return self._send(413, b'za duzy')
+            ctype = self.headers.get('Content-Type', '')
+            m = re.search(r'boundary=([^;]+)', ctype)
+            if not m:
+                return self._send(400, b'brak boundary')
+            raw = self.rfile.read(n)
+            parts = raw.split(('--' + m.group(1)).encode())
+            dest = None
+            names = []
+            for part in parts:
+                if b'\r\n\r\n' not in part:
+                    continue
+                head, _, body = part.partition(b'\r\n\r\n')
+                head = head.decode('utf-8', 'replace')
+                fn = re.search(r'filename="([^"]*)"', head)
+                tk = re.search(r'name="token"\r\n\r\n([^\r]*)', head)
+                if tk:
+                    continue
+                if not fn or not fn.group(1):
+                    continue
+                data = body.rsplit(b'\r\n', 1)[0]
+                if not data:
+                    continue
+                if dest is None:
+                    dest = on_files()
+                    if not dest:
+                        return self._send(500, b'brak folderu')
+                safe = os.path.basename(fn.group(1)).replace('/', '_') or 'foto'
+                p = os.path.join(dest, safe)
+                i = 1
+                while os.path.exists(p):
+                    stem, ext = os.path.splitext(safe)
+                    p = os.path.join(dest, f'{stem}_{i}{ext}')
+                    i += 1
+                with open(p, 'wb') as f:
+                    f.write(data)
+                names.append(os.path.basename(p))
+            if not names:
+                return self._send(400, b'brak plikow')
+            import json
+            self._send(200, json.dumps(
+                {'saved': len(names), 'files': names}).encode(),
+                'application/json')
+
+    class S(socketserver.ThreadingTCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
+    # IPv4 wazne: na Linuksie 'localhost' bywa IPv6 i wtedy telefon/adres
+    # z IP sieciowego nie trafia w to samo gniazdo.
+    S.address_family = socket.AF_INET
+    srv = S(('0.0.0.0', port), H)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    # czekamy az gniazdo faktycznie przyjmuje — inaczej uzytkownik klika
+    # "Skanuj" w sekunde po otwarciu okna i dostaje "polaczenie odrzucone"
+    for _ in range(100):
+        try:
+            with socket.create_connection(('127.0.0.1', port), 0.2):
+                break
+        except OSError:
+            time.sleep(0.05)
+
+    # adresy do wyswietlenia — laptop po WiFi ma inny IP niz 127.0.0.1
+    urls = []
+    try:
+        ip = socket.gethostbyname(socket.gethostname())
+        if not ip.startswith('127.'):
+            urls.append(f'http://{ip}:{port}/?t={token}')
+    except Exception:
+        pass
+    urls.append(f'http://127.0.0.1:{port}/?t={token}')
+    return srv, token, urls
 
 
 def main():
@@ -1328,14 +1873,71 @@ def main():
 if __name__ == '__main__':
     main()
 
-# QSS trzymane jako szablon, zeby nie powtarzac tokenow w 60 miejscach.
-QSS = QSS.format(
-    bg=BG, fg=FG, fg2=FG2, muted=DIM, faint=FAINT,
-    panel=PANEL, panel2=PANEL2, panel3=PANEL3, popover=T.POPOVER,
-    line=LINE, line_strong=T.BORDER_STRONG, ring=T.RING,
-    accent=ACC, accent_hi=T.ACCENT_HOVER, accent_fg=T.ACCENT_FG,
-    accent_soft=T.ACCENT_SOFT,
-    danger=RED, danger_soft=T.DANGER_SOFT, danger_line=T.DANGER_LINE,
-    r1=T.RADIUS['1'], r_sm=T.RADIUS_SM, r_md=T.RADIUS_MD, r_lg=T.RADIUS_LG,
-    r_xl=T.RADIUS_XL, r_2xl=T.RADIUS_2XL, r_full=T.RADIUS['full'],
-)
+# ── Budowanie arkusza stylow dla wybranego motywu ─────────────────────────
+# Jeden szablon, dwa zestawy tokenow. Zmiana motywu to podmiana wartosci,
+# a nie drugi arkusz do utrzymania (i miejsce, gdzie nowy kolor moglby
+# sie rozjechac z reszta interfejsu).
+
+
+def build_qss(t):
+    return _QSS_TEMPLATE.format(
+        bg=t['BG'], fg=t['FG'], muted=t['FG_MUTED'], faint=t['FG_SUBTLE'],
+        panel=t['PANEL'], panel2=t['PANEL_2'], panel3=t['PANEL_3'],
+        popover=t['POPOVER'],
+        line=t['BORDER'], line_strong=t['BORDER_STRONG'], ring=t['RING'],
+        accent=t['ACCENT'], accent_hi=t['ACCENT_HOVER'],
+        accent_fg=t['ACCENT_FG'], accent_soft=t['ACCENT_SOFT'],
+        thumb=t['THUMB'],
+        danger=t['DANGER'], danger_soft=t['DANGER_SOFT'],
+        danger_line=t['DANGER_LINE'], ok=t['OK'], ok_soft=t['OK_SOFT'],
+        r1=T.RADIUS['1'], r_sm=T.RADIUS_SM, r_md=T.RADIUS_MD,
+        r_lg=T.RADIUS_LG, r_xl=T.RADIUS_XL, r_2xl=T.RADIUS_2XL,
+        r_full=T.RADIUS['full'],
+    )
+
+
+def apply_theme(app, name):
+    """Przelacza aplikacje na motyw. Zwraca tokeny, bo widgety trzymaja
+    kolory takze we wlasnych stylach (etykiety statusu itd.)."""
+    t = T.THEMES[name]()
+    app.setStyleSheet(build_qss(t))
+    return t
+
+
+def retheme_window(win, t):
+    """Podmienia kolory na widgetach, ktore ustawiaja je bezposrednio."""
+    win.status.setStyleSheet('')
+    win.title.setStyleSheet('')
+    for key, col in (('files', t['FG_MUTED']), ('dirty', t['DANGER']),
+                     ('high', t['DANGER']), ('clean', t['OK']),
+                     ('risk', t['WARN'])):
+        v = win.stat_vals[key][0]
+        v.setStyleSheet(f'color:{col}; font-size:24px; font-weight:600;'
+                        f' letter-spacing:-0.00625em;')
+    for card in win._cards.values():
+        card.style().unpolish(card)
+        card.style().polish(card)
+        for lab in card.findChildren(QtWidgets.QLabel):
+            lab.style().unpolish(lab)
+            lab.style().polish(lab)
+    win.style().unpolish(win)
+    win.style().polish(win)
+
+
+# domyslnie ciemny; uzytkownik moze przelaczyc przyciskiem w naglowku
+QSS = build_qss(T.dark_tokens())
+TOKENS = T.dark_tokens()
+BG = TOKENS['BG']
+PANEL = TOKENS['PANEL']
+PANEL2 = TOKENS['PANEL_2']
+PANEL3 = TOKENS['PANEL_3']
+LINE = TOKENS['BORDER']
+FG = TOKENS['FG']
+FG2 = TOKENS['FG_MUTED']
+DIM = TOKENS['FG_MUTED']
+FAINT = TOKENS['FG_SUBTLE']
+ACC = TOKENS['ACCENT']
+RED = TOKENS['DANGER']
+AMB = TOKENS['WARN']
+GRN = TOKENS['OK']
+WARN = TOKENS['WARN']
