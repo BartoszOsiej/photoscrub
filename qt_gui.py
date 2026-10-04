@@ -1184,10 +1184,6 @@ class Window(QtWidgets.QMainWindow):
 
         vw = self.scroll.viewport().width() or (self.width() - 480)
         gap = 16
-        # nowe karty musza dziedziczyc filtr scrolla, inaczej gest
-        # touchpada nad karta nie przewija listy
-        for card in list(self._cards.values()):
-            card.installEventFilter(self._scroll_filter)
         # ile kolumn REALNIE sie zmiesci — nie "na oko", tylko dzielenie
         cols = max(2, min(6, int((vw + gap) // (CARD_W + gap))))
         self._cols = cols
@@ -1206,6 +1202,10 @@ class Window(QtWidgets.QMainWindow):
             card.setFixedWidth(CARD_W)
             card.clicked.connect(self.show_detail)
             card.clean_one.connect(self._clean_one)
+            # Filtr scrolla musi byc na karcie OD RAZU. Wczesniej instalo-
+            # walismy go przed utworzeniem kart (po wyczyszczeniu slownika),
+            # wiec na zadna nie trafial i gest nad karta nic nie robil.
+            card.installEventFilter(self._scroll_filter)
             self.grid.addWidget(card, i // cols, i % cols)
             self._cards[r.path] = card
         self.cta.setEnabled(bool(dirty))
