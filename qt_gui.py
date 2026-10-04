@@ -1890,6 +1890,31 @@ f.onchange = async () => {
 </script></body></html>"""
 
 
+def firewall_blocks(port):
+    """Sprawdza, czy lokalny firewall wpuszcza ten port.
+
+    Zwraca True/False albo None gdy nie da sie odczytac (brak firewalld
+    albo brak uprawnien do odczytu regul).
+
+    Robimy to po to, zeby uzytkownik dostal konkretny komunikat zamiast
+    "telefon nie laje strony" bez powodu. Na maszynie z firewalld w strefie
+    public przepuszczone sa tylko ssh i dhcpv6-client, wiec kazdy losowy
+    port byl odrzucany po cichu.
+    """
+    import subprocess
+    try:
+        r = subprocess.run(['firewall-cmd', '--query-port', f'{port}/tcp'],
+                           capture_output=True, text=True, timeout=4)
+        out = r.stdout.strip()
+        if out == 'yes':
+            return False
+        if out == 'no':
+            return True
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
 def _png_bytes(img):
     """qrcode.make() zwraca obraz PIL — zamieniamy na bajty PNG."""
     import io
