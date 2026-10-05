@@ -222,9 +222,17 @@ jobs:
       - name: Report binary size
         shell: bash
         run: |
-          f=$(find . -name "${{ matrix.out }}" -type f -not -path './build/*' \
-              -not -path './dist/*' | head -1)
-          [ -z "$f" ] && f=$(find . -name "${{ matrix.out }}" -type f | head -1)
+          # -type f obowiazkowe: Nuitka zostawia katalog qt_gui.dist o tej
+          # samej nazwie co plik, i find zwracal katalog - raportowal 1 MB
+          # zamiast 44 MB. Szukamy wylacznie plikow.
+          f=$(find . -type f -name "${{ matrix.out }}" \
+              -not -path './build/*' -not -path './dist/*' \
+              -not -path './.git/*' | head -1)
+          if [ -z "$f" ]; then
+            f=$(find . -type f \( -name 'qt_gui' -o -name 'qt_gui.exe' \
+                -o -name 'photoscrub-gui' -o -name 'photoscrub-gui.exe' \) \
+                -not -path './.git/*' -size +1M | sort -t/ -k2 -rn | head -1)
+          fi
           if [ -n "$f" ]; then
             mb=$(du -m "$f" | cut -f1)
             echo "ROZMIAR ${{ matrix.out }}: ${mb} MB"
