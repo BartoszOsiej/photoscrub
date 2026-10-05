@@ -7,7 +7,7 @@
 
   <Identity Name="HartwellLabs.photoscrub"
             Publisher="CN=Hartwell Labs"
-            Version="0.1.0.0" />
+            Version="0.8.1.0" />
 
   <Properties>
     <DisplayName>photoscrub</DisplayName>

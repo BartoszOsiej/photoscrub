@@ -2376,7 +2376,52 @@ def start_phone_server(on_files, port=8765):
     return srv, token, urls
 
 
+def _selftest():
+    """Wbudowany test binarki: --selftest /tmp/x
+
+    Po co to: import PySide6 w srodowisku deweloperskim nie mowi nic o
+    tym, co jest dokladnie zpacked w binarce. Po wyciecciu numpy z builda
+    jedynym pewnym sprawdzeniem HEIC jest uruchomienie gotowej binarki
+    na prawdziwym pliku. Zero zaleznosci zewnetrznych.
+    """
+    import glob
+    import hashlib
+    import shutil
+    import tempfile
+    out = tempfile.mkdtemp()
+    srcs = sorted(glob.glob(os.path.expanduser(
+        '~/zdjecia-testowe/hard/*'))) or sys.argv[2:]
+    ok = err = 0
+    changed = []
+    for f in srcs:
+        h0 = hashlib.sha256(open(f, 'rb').read()).hexdigest()
+        try:
+            r = ps.scan_file(f)
+            if r.kind == 'video':
+                print(f'SKIP video {os.path.basename(f)}')
+                continue
+            dst = ps.safe_dst(f, out)
+            ps.scrub_image(f, dst)
+            after = ps.scan_file(dst).risk_score
+            h1 = hashlib.sha256(open(f, 'rb').read()).hexdigest()
+            if h1 != h0:
+                changed.append(os.path.basename(f))
+            print(f'OK {os.path.basename(f)[:38]:40} risk={r.risk_score}->'
+                  f'{after} intact={h1 == h0}')
+            ok += 1
+        except Exception as e:
+            print(f'ERR {os.path.basename(f)[:38]:40} '
+                  f'{type(e).__name__}: {e}')
+            err += 1
+    shutil.rmtree(out, ignore_errors=True)
+    print(f'--- selftest: ok={ok} err={err} '
+          f'originals_modified={len(changed)}')
+    return 1 if (err or changed) else 0
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == '--selftest':
+        sys.exit(_selftest())
     QtWidgets.QApplication.setHighDpiScaleFactorRoundingPolicy(
         QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QtWidgets.QApplication(sys.argv)

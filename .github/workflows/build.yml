@@ -140,6 +140,7 @@ jobs:
           # linii. Zostawiamy modul po module, reszta jest balastem.
           python -m nuitka --onefile --assume-yes-for-downloads \
             --enable-plugin=pyside6 \
+            --jobs=4 --lto=no \
             --include-package=PySide6.QtCore \
             --include-package=PySide6.QtGui \
             --include-package=PySide6.QtWidgets \
@@ -160,6 +161,8 @@ jobs:
             --nofollow-import-to=PySide6.QtPositioning \
             --nofollow-import-to=PySide6.QtSerialPort \
             --nofollow-import-to=tkinter --nofollow-import-to=unittest \
+            --nofollow-import-to=numpy --nofollow-import-to=cv2 \
+            --nofollow-import-to=tkinterdnd2 \
             --output-dir=build --output-filename=${{ matrix.out }} qt_gui.py
       - name: Fallback to PyInstaller if Nuitka failed
         if: failure()
@@ -190,6 +193,7 @@ jobs:
               --exclude-module=PySide6.QtPositioning \
               --exclude-module=PySide6.QtSerialPort \
               --exclude-module=tkinter --exclude-module=unittest \
+              --exclude-module=numpy --exclude-module=cv2 \
               qt_gui.py
           else
             pyinstaller --onefile --name photoscrub-gui \
@@ -212,6 +216,7 @@ jobs:
               --exclude-module=PySide6.QtPositioning \
               --exclude-module=PySide6.QtSerialPort \
               --exclude-module=tkinter --exclude-module=unittest \
+              --exclude-module=numpy --exclude-module=cv2 \
               qt_gui.py
           fi
       - name: Report binary size
