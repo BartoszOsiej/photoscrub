@@ -281,48 +281,79 @@ jobs:
 
   msix:
     runs-on: windows-latest
-    needs: [windows]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Build exe
+      - name: Build the STORE GUI (no license prompt)
+        shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt nuitka
-          python -m nuitka --onefile --assume-yes-for-downloads --include-package=PIL --include-package=cryptography --output-filename=photoscrub.exe --output-dir=build photoscrub.py
+          pip install -r requirements.txt 'nuitka[onefile]'
+          # Ten pakiet jest dla Microsoft Store, wiec:
+          #   - budujemy qt_gui.py (GUI), NIE photoscrub.py (CLI) - wczesniejsza
+          #     wersja pakowala CLI i MSIX nie mial okna
+          #   - --define-store zaszywa STORE_BUILD=True, wiec program nie
+          #     prosi o klucz licencyjny (zakup robi sklep)
+          #   - lista modulow zamiast --include-package=PySide6 (733 MB -> ~50 MB)
+          python -m nuitka --onefile --assume-yes-for-downloads \
+            --enable-plugin=pyside6 --jobs=4 --lto=no \
+            --define=STORE_BUILD=True \
+            --include-package=PySide6.QtCore \
+            --include-package=PySide6.QtGui \
+            --include-package=PySide6.QtWidgets \
+            --include-module=shiboken6 \
+            --include-package=PIL --include-package=cryptography \
+            --include-module=qrcode --include-module=pillow_heif \
+            --nofollow-import-to=numpy --nofollow-import-to=cv2 \
+            --nofollow-import-to=PySide6.QtWebEngineCore \
+            --nofollow-import-to=PySide6.QtWebEngineWidgets \
+            --nofollow-import-to=PySide6.Qt3DCore \
+            --nofollow-import-to=PySide6.Qt3DRender \
+            --nofollow-import-to=PySide6.Qt3DExtras \
+            --nofollow-import-to=PySide6.QtMultimedia \
+            --nofollow-import-to=PySide6.QtMultimediaWidgets \
+            --nofollow-import-to=PySide6.QtQuick3D \
+            --nofollow-import-to=PySide6.QtCharts \
+            --nofollow-import-to=PySide6.QtDataVisualization \
+            --nofollow-import-to=PySide6.QtBluetooth \
+            --nofollow-import-to=PySide6.QtPositioning \
+            --nofollow-import-to=PySide6.QtSerialPort \
+            --nofollow-import-to=tkinter --nofollow-import-to=unittest \
+            --output-filename=photoscrub.exe --output-dir=build qt_gui.py
+      - name: Verify it is the GUI build, not the CLI
+        shell: bash
+        run: |
+          f=$(find . -type f -name photoscrub.exe | head -1)
+          [ -z "$f" ] && { echo "::error::nie znaleziono photoscrub.exe"; exit 1; }
+          mb=$(du -m "$f" | cut -f1); echo "photoscrub.exe: ${mb} MB"
+          echo "### MSIX gui: ${mb} MB" >> $GITHUB_STEP_SUMMARY
+          if [ "$mb" -lt 20 ]; then
+            echo "::error::exe ma ${mb} MB - to nie jest GUI z Qt (CLI ma ~27 MB, GUI ~50 MB)"
+            exit 1
+          fi
       - name: Pack MSIX
         shell: pwsh
         run: |
           $kfh = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter makeappx.exe -ErrorAction SilentlyContinue |
                  Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1
-          if (-not $kfh) {
-            $kfh = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter makeappx.exe -ErrorAction SilentlyContinue |
-                   Select-Object -First 1
-          }
           if (-not $kfh) { throw "makeappx.exe not found" }
-          # Wersja sklepowa: zakup robi Microsoft Store, wiec program
-          # nie prosi o klucz. Zmienna ustawiana TYLKO dla MSIX - plik .exe
-          # z tej samej gałęzi zostaje z licencją, bo tam sprzedajemy klucz.
-          $env:PHOTOSCRUB_NO_LICENSE = '1'
           New-Item -ItemType Directory -Force msix_payload | Out-Null
-          # Nuitka bez --output-dir pisze do biezacego katalogu, wiec plik
-          # lezy w repo, nie w build/ (i build/ w ogole nie istnieje).
           $exe = Get-ChildItem -Path . -Recurse -File -Filter 'photoscrub.exe' -ErrorAction SilentlyContinue |
-                 Where-Object { $_.FullName -notmatch 'msix_payload|dist' } | Select-Object -First 1
+                 Where-Object { $_.FullName -notmatch 'msix_payload|msix_out' } | Select-Object -First 1
           if (-not $exe) { throw "photoscrub.exe not produced" }
-          Get-Item $exe.FullName | Select-Object FullName,Length
           Copy-Item $exe.FullName msix_payload/photoscrub.exe
           Copy-Item packaging/msix/AppxManifest.xml msix_payload/
           Copy-Item -Recurse packaging/msix/assets msix_payload/assets
           New-Item -ItemType Directory -Force msix_out | Out-Null
           & $kfh.FullName pack /d msix_payload /p msix_out/photoscrub.msix /o
           if (-not (Test-Path msix_out/photoscrub.msix)) { throw "MSIX not produced" }
+          Get-Item msix_out/photoscrub.msix | Select-Object Name,Length
       - uses: actions/upload-artifact@v4
         with:
           name: photoscrub-msix
-          path: msix_out/
+          path: msix_out/photoscrub.msix
 
   release:
     needs: [linux, windows, gui]

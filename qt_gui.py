@@ -284,6 +284,15 @@ CARD_W = 228   # stal szerokosc karty: kolumny liczone dokladnie, bez
                # zgadywania i bez obcinania prawej kolumny
 
 
+# Nuitka define: CI buduje MSIX z --define-store, co daje
+# STORE_BUILD=True. Zmienna srodowiskowa NIE DZIALA w binarce Nuitka -
+# os.environ nie jest wstrzykiwany, wiec trzeba zaszyc na kompilacji.
+try:
+    STORE_BUILD = bool(STORE_BUILD)   # zdefiniowane przez Nuitka --define-store
+except NameError:
+    STORE_BUILD = os.environ.get('PHOTOSCRUB_NO_LICENSE', '') == '1'
+
+
 def is_store_build():
     """Czy to build wystawiony w Microsoft Store.
 
@@ -293,10 +302,10 @@ def is_store_build():
       - wlasna dystrybucja (.exe, Uptodown, strona): klucz od klienta
         i wklejanie go w programie
 
-    Zmienna PHOTOSCRUB_NO_LICENSE ustawiana przez CI przy budowaniu MSIX.
-    Domyslnie false - bez zmian w dotychczasowym zachowaniu.
+    MSIX budowany jest z --define-store, co daje STORE_BUILD=True na
+    etapie kompilacji. .exe budowane osobno bez tej flagi zachowuje licencje.
     """
-    return os.environ.get('PHOTOSCRUB_NO_LICENSE', '') == '1'
+    return STORE_BUILD
 
 
 def thumb_pixels(path, box=(224, 132)):
