@@ -17,6 +17,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 import license as lic
 import model as mdl
+import i18n
 import photoscrub as ps
 import ruleset as rs
 import theme as T
@@ -407,7 +408,7 @@ class Card(QtWidgets.QFrame):
             label, QtCore.Qt.ElideRight, CARD_W - 108))
         row.addWidget(b, 1)
         if worst:
-            tag = QtWidgets.QLabel('NAJGORSZY')
+            tag = QtWidgets.QLabel(i18n.t('worst'))
             tag.setObjectName('worstTag')
             row.addWidget(tag, 0, QtCore.Qt.AlignRight)
         elif risk is not None:
@@ -486,12 +487,12 @@ class DropZone(QtWidgets.QFrame):
         v.addWidget(ico)
         v.addSpacing(8)
 
-        t = QtWidgets.QLabel('Upuść zdjęcia lub filmy')
+        t = QtWidgets.QLabel(i18n.t('drop_photos'))
         t.setObjectName('dropTitle')
         t.setAlignment(QtCore.Qt.AlignCenter)
         v.addWidget(t)
 
-        s = QtWidgets.QLabel('albo kliknij, żeby wybrać pliki')
+        s = QtWidgets.QLabel(i18n.t('or_click_to_choose'))
         s.setObjectName('dropSub')
         s.setAlignment(QtCore.Qt.AlignCenter)
         v.addWidget(s)
@@ -694,7 +695,13 @@ class _ScrollFilter(QtCore.QObject):
 
 class Window(QtWidgets.QMainWindow):
     def __init__(self):
+        # Jezyk musi byc znany PRZED budowa widgetow - inaczej wszystkie
+        # napisy powstana w jezyku domyslnym, a PHOTOSCRUB_LANG zignorowany.
+        i18n.init()
         super().__init__()
+        # Jezyk musi byc znany PRZED budowa widgetow, inaczej
+        # wszystkie napisy powstana w jezyku domyslnym.
+        i18n.init()
         self.setWindowTitle('photoscrub')
         # GNOME: "smallest recommended display size for GNOME on desktop is
         # currently 1024x600px, and this size should be supported by all apps".
@@ -723,11 +730,11 @@ class Window(QtWidgets.QMainWindow):
         root.addLayout(self._header())
         root.addSpacing(24)
 
-        self.title = QtWidgets.QLabel('Zobacz, co Twoje zdjęcia zdradzają')
+        self.title = QtWidgets.QLabel(i18n.t('see_what_your_photos_reveal'))
         self.title.setObjectName('title')
         root.addWidget(self.title)
         self.subtitle = QtWidgets.QLabel(
-            'Paswywnie i offline. Oryginały zostają tam, gdzie są.')
+            i18n.t('passive_offline'))
         self.subtitle.setObjectName('subtitle')
         root.addWidget(self.subtitle)
         root.addSpacing(24)
@@ -783,7 +790,7 @@ class Window(QtWidgets.QMainWindow):
         sv.setContentsMargins(20, 20, 20, 20)
         sv.setSpacing(8)
 
-        lbl = QtWidgets.QLabel('SZCZEGÓŁY')
+        lbl = QtWidgets.QLabel(i18n.t('details'))
         lbl.setObjectName('panelLabel')
         sv.addWidget(lbl)
         sv.addSpacing(4)
@@ -811,7 +818,7 @@ class Window(QtWidgets.QMainWindow):
 
         # Jak to dziala jest informacja drugorzedna (Hick) - schowana pod
         # jednym przyciskiem zamiast zajmowac 1/3 panelu na ekranie.
-        more = QtWidgets.QPushButton('Jak to działa')
+        more = QtWidgets.QPushButton(i18n.t('how_it_works'))
         more.setProperty('variant', 'ghost')
         more.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         more.clicked.connect(self._about)
@@ -823,7 +830,7 @@ class Window(QtWidgets.QMainWindow):
         self.foot_extra = QtWidgets.QHBoxLayout()
         self.foot_extra.setSpacing(8)
         foot.addLayout(self.foot_extra)
-        self.cta = QtWidgets.QPushButton('Usuń metadane')
+        self.cta = QtWidgets.QPushButton(i18n.t('remove_metadata'))
         self.cta.setProperty('variant', 'solid')
         self.cta.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.cta.setEnabled(False)
@@ -881,9 +888,10 @@ class Window(QtWidgets.QMainWindow):
         h.addLayout(names)
         h.addStretch(1)
 
-        for text, slot, key in (('Wybierz folder', self.add_folder,
+        for text, slot, key in ((i18n.t('btn_folder'), self.add_folder,
                                  'Ctrl+Shift+D'),
-                                ('Dodaj pliki', self.add_files, 'Ctrl+O')):
+                                (i18n.t('btn_files'), self.add_files,
+                                 'Ctrl+O')):
             b = QtWidgets.QPushButton(text)
             b.setProperty('variant', 'ghost')
             b.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
@@ -902,7 +910,7 @@ class Window(QtWidgets.QMainWindow):
         h.addWidget(self._theme_btn)
         self._paint_theme_icon()
 
-        phone = QtWidgets.QPushButton('Z telefonu')
+        phone = QtWidgets.QPushButton(i18n.t('btn_phone'))
         phone.setProperty('variant', 'ghost')
         phone.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         phone.setToolTip('Wyslij zdjecia z iPhone albo Androida (Ctrl+M)')
@@ -911,7 +919,7 @@ class Window(QtWidgets.QMainWindow):
         about = QtWidgets.QPushButton('?')
         about.setProperty('variant', 'ghost')
         about.setFixedWidth(32)
-        about.setToolTip('Jak to działa')
+        about.setToolTip(i18n.t('how_it_works'))
         about.clicked.connect(self._about)
         h.addWidget(about)
         return h
@@ -952,22 +960,22 @@ class Window(QtWidgets.QMainWindow):
         # a jego rola to F10 + skroty. GNOME: "F10 - open primary menu".
         m.setNativeMenuBar(False)
         f = m.addMenu('&Plik')
-        a = f.addAction('Dodaj pliki...', self.add_files)
+        a = f.addAction(i18n.t('add_files'), self.add_files)
         a.setShortcut('Ctrl+O')
-        a = f.addAction('Wybierz folder...', self.add_folder)
+        a = f.addAction(i18n.t('add_folder'), self.add_folder)
         a.setShortcut('Ctrl+Shift+D')
         f.addSeparator()
-        f.addAction('Zamknij', self.close).setShortcut('Ctrl+Q')
+        f.addAction(i18n.t('close'), self.close).setShortcut('Ctrl+Q')
         sm = m.addMenu('&Akcje')
-        a = sm.addAction('Skanuj ponownie',
+        a = sm.addAction(i18n.t('scan_again'),
                          lambda: self.add_paths([r.path for r, _ in self.rows]))
         a.setShortcut('Ctrl+R')
-        a = sm.addAction('Usun metadane', self.clean)
+        a = sm.addAction(i18n.t('menu_remove2'), self.clean)
         a.setShortcut('Ctrl+E')
         sm.addSeparator()
-        sm.addAction('Zdjecia z telefonu', self._from_phone).setShortcut('Ctrl+M')
-        sm.addAction('Przelacz motyw', self.toggle_theme).setShortcut('Ctrl+T')
-        sm.addAction('Jak to dziala', self._about).setShortcut('F1')
+        sm.addAction(i18n.t('menu_phone2'), self._from_phone).setShortcut('Ctrl+M')
+        sm.addAction(i18n.t('menu_theme2'), self.toggle_theme).setShortcut('Ctrl+T')
+        sm.addAction(i18n.t('menu_how2'), self._about).setShortcut('F1')
         return m
 
     def keyPressEvent(self, e):
@@ -986,9 +994,11 @@ class Window(QtWidgets.QMainWindow):
         row = QtWidgets.QHBoxLayout()
         row.setSpacing(32)
         self.stat_vals = {}
-        tiles = (('files', 'plików', DIM), ('dirty', 'z danymi', RED),
-                 ('high', 'pilne', RED), ('clean', 'czyste', GRN),
-                 ('risk', 'ryzyko /100', AMB))
+        tiles = (('files', i18n.t('stat_files'), DIM),
+                 ('dirty', i18n.t('stat_dirty'), RED),
+                 ('high', i18n.t('stat_high'), RED),
+                 ('clean', i18n.t('stat_clean'), GRN),
+                 ('risk', i18n.t('stat_risk'), AMB))
         for key, label, col in tiles:
             box = QtWidgets.QVBoxLayout()
             box.setSpacing(0)
@@ -1023,13 +1033,13 @@ class Window(QtWidgets.QMainWindow):
 
     def _about(self):
         d = QtWidgets.QDialog(self)
-        d.setWindowTitle('Jak to działa')
+        d.setWindowTitle(i18n.t('how_it_works'))
         d.setModal(True)
         d.setFixedWidth(560)
         v = QtWidgets.QVBoxLayout(d)
         v.setContentsMargins(28, 28, 28, 28)
         v.setSpacing(12)
-        t = QtWidgets.QLabel('Jak to działa')
+        t = QtWidgets.QLabel(i18n.t('how_it_works'))
         t.setObjectName('dlgTitle')
         v.addWidget(t)
         b = QtWidgets.QTextBrowser()
@@ -1075,11 +1085,11 @@ class Window(QtWidgets.QMainWindow):
             elif ups:
                 u = ups[0]
                 self.status.setText(
-                    f'Reguły v{rv} · nowsze reguły v{u["version"]} dostępne — '
+                    i18n.t('rules_newer', rv=rv, u=u['version'], items=items)
                     + ' · '.join(n for n, _ in u['new'][:3]))
                 self.status.setStyleSheet(f'color:{AMB}')
             else:
-                self.status.setText(f'licencja aktywna · reguły v{rv}')
+                self.status.setText(i18n.t('license_active', rv=rv))
                 self.status.setStyleSheet(f'color:{GRN}')
             return
         self._activate(info if st != 'brak' else 'Wklej klucz, który dostałeś '
@@ -1143,7 +1153,7 @@ class Window(QtWidgets.QMainWindow):
 
     def add_files(self):
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
-            self, 'Wybierz zdjęcia i filmy', '',
+            self, i18n.t('choose_files'), '',
             'Zdjęcia i filmy (*.jpg *.jpeg *.png *.tif *.tiff *.webp *.heic '
             '*.heif *.avif *.gif *.bmp *.mp4 *.mov *.m4v);;Wszystkie pliki (*)')
         if paths:
@@ -1151,7 +1161,7 @@ class Window(QtWidgets.QMainWindow):
 
     def add_folder(self):
         d = QtWidgets.QFileDialog.getExistingDirectory(
-            self, 'Wybierz folder ze zdjęciami')
+            self, i18n.t('choose_folder'))
         if d:
             self.add_paths([d])
 
@@ -1178,7 +1188,7 @@ class Window(QtWidgets.QMainWindow):
         self._thumbs = {}
         self.selected = None
         self.cta.setEnabled(False)
-        self.status.setText(f'Sprawdzam {len(uniq)} plików…')
+        self.status.setText(i18n.t('scanning_n', n=len(uniq)))
         self.status.setStyleSheet(f'color:{DIM}')
         self.progress.show()
         self.progress.setValue(0)
@@ -1199,7 +1209,7 @@ class Window(QtWidgets.QMainWindow):
 
     def _on_progress(self, done, total):
         self.progress.setValue(int(done / max(1, total) * 100))
-        self.status.setText(f'Sprawdzam… {done}/{total}')
+        self.status.setText(i18n.t('scanning', done=done, total=total))
         self.status.setStyleSheet(f'color:{DIM}')
 
     def _on_done(self, reps, thumbs):
@@ -1261,7 +1271,7 @@ class Window(QtWidgets.QMainWindow):
         self._cards = {}
         rows = self.rows
         if not rows:
-            self.title.setText('Zobacz, co Twoje zdjęcia zdradzają')
+            self.title.setText(i18n.t('see_what_your_photos_reveal'))
             self.title.setStyleSheet(f'color:{FG}')
             self.subtitle.setText('Paswywnie i offline. Oryginały zostają tam, '
                                   'gdzie są.')
@@ -1280,22 +1290,22 @@ class Window(QtWidgets.QMainWindow):
 
         self.stack.setCurrentWidget(self.scroll)
         if dirty:
-            self.title.setText(f'{len(dirty)} z {len(rows)} plików ujawnia dane')
+            self.title.setText(i18n.t('scanning_top',
+                                       len=len(dirty), total=len(rows)))
             self.title.setStyleSheet(f'color:{FG}')
             self.subtitle.setText(
-                f'Najwyższe ryzyko publikacji: {top}/100. Reguły v'
-                f'{self.ruleset} · zero skanowania, zero sieci.')
+                i18n.t('top_risk', top=top, rv=self.ruleset))
         else:
-            self.title.setText('Te pliki są czyste')
+            self.title.setText(i18n.t('already_clean_title'))
             self.title.setStyleSheet(f'color:{GRN}')
-            self.subtitle.setText('Nic do usuwania — możesz je wrzucać na '
-                                  'serwer.')
+            self.subtitle.setText(i18n.t('empty_title')
+                                  + i18n.t('empty_sub'))
         self._set_stat('files', len(rows))
         self._set_stat('dirty', len(dirty))
         self._set_stat('high', len(high))
         self._set_stat('clean', clean)
         self._set_stat('risk', top)
-        self.count.setText(f'{len(rows)} plików')
+        self.count.setText(i18n.t('files_n', n=len(rows)))
         self.status.setText('')
 
         vw = self.scroll.viewport().width() or (self.width() - 480)
@@ -1330,9 +1340,11 @@ class Window(QtWidgets.QMainWindow):
         if rep is not None and rep.note:
             return rep.note, None
         if not s:
-            return 'brak reguł', None
-        short = {'bezpieczne': 'bezpieczne', 'tylko metadane': 'metadane',
-                 'lokalizacja': 'LOKALIZACJA', 'tozsamosc': 'TOŻSAMOŚĆ'}
+            return i18n.t('no_rules'), None
+        short = {'bezpieczne': i18n.t('sev_safe'),
+                 'tylko metadane': i18n.t('sev_meta'),
+                 'lokalizacja': i18n.t('sev_location'),
+                 'tozsamosc': i18n.t('sev_identity')}
         return short.get(s['class'], s['class']), s['risk']
 
     def show_detail(self, rep, keep_name=False):
@@ -1350,22 +1362,27 @@ class Window(QtWidgets.QMainWindow):
             f'{human(os.path.getsize(rep.path))} · {os.path.dirname(rep.path)}')
         if not rep.findings:
             self.detail.setHtml(
-                f'<p style="color:{GRN}">Czyste. Nic do usuwania.</p>')
+                f'<p style="color:{GRN}">{i18n.t("already_clean")}</p>')
             return
 
         head = ''
         if s:
             head = (f'<p style="color:{AMB};font-size:20px;font-weight:600;'
-                    f'margin:0 0 2px 0">RYZYKO {s["risk"]}/100</p>'
-                    f'<p style="color:{DIM};margin:0">{s["class"]} · '
-                    f'pewność {s["confidence"] * 100:.0f}%</p>')
+                    f'margin:0 0 2px 0">{i18n.t("sev_title", risk=s["risk"])}</p>'
+                    f'<p style="color:{DIM};margin:0">'
+                    + i18n.t('sev_line', cls=i18n.t('sev_' + {
+                        'lokalizacja': 'location', 'tozsamosc': 'identity',
+                        'bezpieczne': 'safe',
+                        'tylko metadane': 'meta'}.get(s['class'], 'safe')),
+                             pct=s["confidence"] * 100) + '</p>')
         parts = [head]
         for cat, items in findings_groups(rep):
             col = {'lokalizacja': RED, 'tozsamosc': RED, 'sprzet': AMB,
                    'czas': DIM, 'tekst': DIM}.get(cat, DIM)
             parts.append(
                 f'<p style="color:{col};font-size:12px;font-weight:500;'
-                f'margin:16px 0 4px 0">{cat.upper()}</p>')
+                f'margin:16px 0 4px 0">'
+                + i18n.t('cat_' + cat, cat.upper()).upper() + '</p>')
             for f in items:
                 fc = RED if f.risk == 'HIGH' else (AMB if f.risk == 'MED'
                                                     else DIM)
@@ -1448,7 +1465,7 @@ class Window(QtWidgets.QMainWindow):
         self._phone_srv = srv
 
         d = QtWidgets.QDialog(self)
-        d.setWindowTitle('Wyślij zdjęcia z telefonu')
+        d.setWindowTitle(i18n.t('phone_title2'))
         d.setModal(True)
         d.setFixedWidth(480)
         v = QtWidgets.QVBoxLayout(d)
@@ -1492,14 +1509,14 @@ class Window(QtWidgets.QMainWindow):
             v.addWidget(alt)
 
 
-        self._phone_status = QtWidgets.QLabel('Czekam na pliki z telefonu…')
+        self._phone_status = QtWidgets.QLabel(i18n.t('waiting_files'))
         self._phone_status.setObjectName('subtitle')
         self._phone_status.setAlignment(QtCore.Qt.AlignCenter)
         v.addWidget(self._phone_status)
 
         row = QtWidgets.QHBoxLayout()
         row.setSpacing(8)
-        copy = QtWidgets.QPushButton('Kopiuj link')
+        copy = QtWidgets.QPushButton(i18n.t('copy_link'))
         copy.clicked.connect(
             lambda: QtWidgets.QApplication.clipboard().setText(urls[0]))
         row.addWidget(copy)
@@ -1574,8 +1591,8 @@ class Window(QtWidgets.QMainWindow):
         import glob
         files = glob.glob(os.path.join(self._phone_dir, '*'))
         if files:
-            self._phone_status.setText(f'Otrzymano {len(files)} plików — '
-                                       'skanuję teraz')
+            self._phone_status.setText(
+                i18n.t('phone_got', n=len(files)) + i18n.t('phone_now'))
             self._phone_status.setStyleSheet(f'color:{GRN}')
 
     def _scan_phone(self):
@@ -1705,11 +1722,12 @@ class Window(QtWidgets.QMainWindow):
         self.title.setStyleSheet(f'color:{GRN}')
         self.subtitle.setText(f'Kopie w {out} — oryginały nietknięte, '
                               f'z metadanych zniknęło {human(freed)}.')
-        self.status.setText(f'{done} plików bez metadanych')
+        self.status.setText(i18n.t('clean_count', done=done, out=self.out))
         self.status.setStyleSheet(f'color:{GRN}')
         if failed:
-            self.toast.show_toast(f'{done} oczyszczone, {len(failed)} pominięte',
-                                  '\n'.join(failed[:4]), 'warn', 8000)
+            self.toast.show_toast(
+                i18n.t('clean_summary', done=done, failed=len(failed)),
+                '\n'.join(failed[:4]), 'warn', 8000)
         else:
             self.toast.show_toast('Gotowe',
                                   f'{done} plików zapisanych w:\n{out}', 'ok')
@@ -1884,7 +1902,7 @@ function upload(file) {
       c.textContent = 'Wysyłam ' + file.name + ' — ' + mb(ev.loaded)
                     + ' z ' + mb(ev.total) + ' (' + Math.round(pc) + '%)';
     };
-    x.onerror = () => reject(new Error('brak połączenia z komputerem'));
+    x.onerror = () => reject(new Error('cannot reach your computer'));
     x.ontimeout = () => reject(new Error('przekroczono czas'));
     x.onload = () => {
       let j = {}; try { j = JSON.parse(x.responseText); } catch (e) {}
@@ -2361,7 +2379,7 @@ def start_phone_server(on_files, port=8765):
                 elif code == 'empty':
                     msg, st = 'puste żądanie — wybierz pliki', 400
                 else:
-                    msg, st = 'nie udało się odczytać wysyłki', 400
+                    msg, st = i18n.t('upload_read_fail'), 400
                 return self._send(st, json.dumps({'error': msg}).encode(),
                                   'application/json')
             except Exception:
