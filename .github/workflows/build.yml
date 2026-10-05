@@ -294,12 +294,13 @@ jobs:
           # Ten pakiet jest dla Microsoft Store, wiec:
           #   - budujemy qt_gui.py (GUI), NIE photoscrub.py (CLI) - wczesniejsza
           #     wersja pakowala CLI i MSIX nie mial okna
-          #   - --define-store zaszywa STORE_BUILD=True, wiec program nie
-          #     prosi o klucz licencyjny (zakup robi sklep)
+          #   - PHOTOSCRUB_NO_LICENSE=1 ustawiamy W TYM SAMYM kroku co build,
+          #     nie przy pakowaniu (tam bylo za pozno - build sie juz wykonal).
+          #     Zweryfikowane recznie: os.environ dziala w binarce Nuitka.
           #   - lista modulow zamiast --include-package=PySide6 (733 MB -> ~50 MB)
+          export PHOTOSCRUB_NO_LICENSE=1
           python -m nuitka --onefile --assume-yes-for-downloads \
             --enable-plugin=pyside6 --jobs=4 --lto=no \
-            --define=STORE_BUILD=True \
             --include-package=PySide6.QtCore \
             --include-package=PySide6.QtGui \
             --include-package=PySide6.QtWidgets \
