@@ -65,4 +65,8 @@ python3 tools/issue.py --email you@example.com --name "Buyer" --ruleset 2
 
 ## License
 
-MIT.
+Proprietary, all rights reserved. See `LICENSE`.
+
+The source is closed. Buying a license key gives you the right to use the
+compiled application on one machine — it does not transfer any rights in
+this code, and redistribution is not permitted.

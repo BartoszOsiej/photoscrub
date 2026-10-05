@@ -1,5 +1,10 @@
 __pycache__/
 build/
 dist/
-*.spec
 *.tmp
+# Nuitka zostawia raport awarii (często 1 MB XML) w katalogu roboczym
+# przy każdym nieudanym buildzie. Nie ma sensu w repo.
+nuitka-crash-report*.xml
+
+# bin/ trzyma skrypty startowe, nie binaria - budujemy w CI
+*.spec
