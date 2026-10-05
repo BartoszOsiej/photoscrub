@@ -134,21 +134,101 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
+          # --include-package=PySide6 pakowal 648 MB (WebEngine, Qt3D,
+          # QtMultimedia...) na 14 MB faktycznie uzywanych modulow
+          # (QtCore/QtGui/QtWidgets). Build wazyl 732 MB, a kod to 5 tys.
+          # linii. Zostawiamy modul po module, reszta jest balastem.
           python -m nuitka --onefile --assume-yes-for-downloads \
-            --enable-plugin=pyside6 --include-package=PySide6 \
+            --enable-plugin=pyside6 \
+            --include-package=PySide6.QtCore \
+            --include-package=PySide6.QtGui \
+            --include-package=PySide6.QtWidgets \
+            --include-module=shiboken6 \
             --include-package=PIL --include-package=cryptography \
+            --include-module=qrcode --include-module=pillow_heif \
+            --nofollow-import-to=PySide6.QtWebEngineCore \
+            --nofollow-import-to=PySide6.QtWebEngineWidgets \
+            --nofollow-import-to=PySide6.Qt3DCore \
+            --nofollow-import-to=PySide6.Qt3DRender \
+            --nofollow-import-to=PySide6.Qt3DExtras \
+            --nofollow-import-to=PySide6.QtMultimedia \
+            --nofollow-import-to=PySide6.QtMultimediaWidgets \
+            --nofollow-import-to=PySide6.QtQuick3D \
+            --nofollow-import-to=PySide6.QtCharts \
+            --nofollow-import-to=PySide6.QtDataVisualization \
+            --nofollow-import-to=PySide6.QtBluetooth \
+            --nofollow-import-to=PySide6.QtPositioning \
+            --nofollow-import-to=PySide6.QtSerialPort \
+            --nofollow-import-to=tkinter --nofollow-import-to=unittest \
             --output-dir=build --output-filename=${{ matrix.out }} qt_gui.py
       - name: Fallback to PyInstaller if Nuitka failed
         if: failure()
         shell: bash
         run: |
           echo "Nuitka failed - shipping PyInstaller build instead"
+          # --collect-all PySide6 to ten sam blad co --include-package:
+          # pakuje 648 MB, z czego uzywamy 14 MB. --collect-all zostaje
+          # tylko dla PIL (hooking HEIF), a PySide6 idzie modulami.
           if [ "$RUNNER_OS" = "Windows" ]; then
             pyinstaller --onefile --noconsole --name photoscrub-gui \
-              --collect-all PySide6 --collect-all PIL qt_gui.py
+              --collect-all PIL \
+              --hidden-import=PySide6.QtCore \
+              --hidden-import=PySide6.QtGui \
+              --hidden-import=PySide6.QtWidgets \
+              --hidden-import=qrcode --hidden-import=pillow_heif \
+              --exclude-module=PySide6.QtWebEngineCore \
+              --exclude-module=PySide6.QtWebEngineWidgets \
+              --exclude-module=PySide6.Qt3DCore \
+              --exclude-module=PySide6.Qt3DRender \
+              --exclude-module=PySide6.Qt3DExtras \
+              --exclude-module=PySide6.QtMultimedia \
+              --exclude-module=PySide6.QtMultimediaWidgets \
+              --exclude-module=PySide6.QtQuick3D \
+              --exclude-module=PySide6.QtCharts \
+              --exclude-module=PySide6.QtDataVisualization \
+              --exclude-module=PySide6.QtBluetooth \
+              --exclude-module=PySide6.QtPositioning \
+              --exclude-module=PySide6.QtSerialPort \
+              --exclude-module=tkinter --exclude-module=unittest \
+              qt_gui.py
           else
             pyinstaller --onefile --name photoscrub-gui \
-              --collect-all PySide6 --collect-all PIL qt_gui.py
+              --collect-all PIL \
+              --hidden-import=PySide6.QtCore \
+              --hidden-import=PySide6.QtGui \
+              --hidden-import=PySide6.QtWidgets \
+              --hidden-import=qrcode --hidden-import=pillow_heif \
+              --exclude-module=PySide6.QtWebEngineCore \
+              --exclude-module=PySide6.QtWebEngineWidgets \
+              --exclude-module=PySide6.Qt3DCore \
+              --exclude-module=PySide6.Qt3DRender \
+              --exclude-module=PySide6.Qt3DExtras \
+              --exclude-module=PySide6.QtMultimedia \
+              --exclude-module=PySide6.QtMultimediaWidgets \
+              --exclude-module=PySide6.QtQuick3D \
+              --exclude-module=PySide6.QtCharts \
+              --exclude-module=PySide6.QtDataVisualization \
+              --exclude-module=PySide6.QtBluetooth \
+              --exclude-module=PySide6.QtPositioning \
+              --exclude-module=PySide6.QtSerialPort \
+              --exclude-module=tkinter --exclude-module=unittest \
+              qt_gui.py
+          fi
+      - name: Report binary size
+        shell: bash
+        run: |
+          f=$(find . -name "${{ matrix.out }}" -type f -not -path './build/*' \
+              -not -path './dist/*' | head -1)
+          [ -z "$f" ] && f=$(find . -name "${{ matrix.out }}" -type f | head -1)
+          if [ -n "$f" ]; then
+            mb=$(du -m "$f" | cut -f1)
+            echo "ROZMIAR ${{ matrix.out }}: ${mb} MB"
+            echo "### rozmiar ${{ matrix.out }}: ${mb} MB" >> $GITHUB_STEP_SUMMARY
+            if [ "$mb" -gt 120 ]; then
+              echo "::warning::binary ${mb} MB - sprawdz --include-package"
+            fi
+          else
+            echo "::error::nie znaleziono ${{ matrix.out }}"
           fi
       - name: Stage the binary
         shell: pwsh
