@@ -284,6 +284,21 @@ CARD_W = 228   # stal szerokosc karty: kolumny liczone dokladnie, bez
                # zgadywania i bez obcinania prawej kolumny
 
 
+def is_store_build():
+    """Czy to build wystawiony w Microsoft Store.
+
+    Dwie wersje z jednego kodu:
+      - sklep: plac Microsoft Store za zakup, wiec licencja jest zbędna
+        i w ogole nie pokazujemy uzytkownikowi okna aktywacji
+      - wlasna dystrybucja (.exe, Uptodown, strona): klucz od klienta
+        i wklejanie go w programie
+
+    Zmienna PHOTOSCRUB_NO_LICENSE ustawiana przez CI przy budowaniu MSIX.
+    Domyslnie false - bez zmian w dotychczasowym zachowaniu.
+    """
+    return os.environ.get('PHOTOSCRUB_NO_LICENSE', '') == '1'
+
+
 def thumb_pixels(path, box=(224, 132)):
     """Zwraca surowe bajty RGB + rozmiar - bez QPixmap.
 
@@ -1036,6 +1051,11 @@ class Window(QtWidgets.QMainWindow):
         return st, info, (lic.purchased_ruleset(payload) if payload else 1)
 
     def _gate(self):
+        # Wersja ze sklepu: zakup zrobiony w Microsoft Store, wiec nie
+        # ma klucza do wklejania i nie blokujemy uzytkownika dialogiem.
+        if is_store_build():
+            self.ruleset = 2
+            return
         st, info, rv = self._license()
         self.ruleset = rv
         if st in ('ok', 'grace'):

@@ -302,6 +302,10 @@ jobs:
                    Select-Object -First 1
           }
           if (-not $kfh) { throw "makeappx.exe not found" }
+          # Wersja sklepowa: zakup robi Microsoft Store, wiec program
+          # nie prosi o klucz. Zmienna ustawiana TYLKO dla MSIX - plik .exe
+          # z tej samej gałęzi zostaje z licencją, bo tam sprzedajemy klucz.
+          $env:PHOTOSCRUB_NO_LICENSE = '1'
           New-Item -ItemType Directory -Force msix_payload | Out-Null
           # Nuitka bez --output-dir pisze do biezacego katalogu, wiec plik
           # lezy w repo, nie w build/ (i build/ w ogole nie istnieje).
