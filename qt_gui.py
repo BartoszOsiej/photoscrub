@@ -697,8 +697,10 @@ class _ScrollFilter(QtCore.QObject):
 class Window(QtWidgets.QMainWindow):
     def __init__(self):
         # Jezyk musi byc znany PRZED budowa widgetow — inaczej wszystkie
-        # napisy powstaną w języku domyślnym, a PHOTOSCRUB_LANG zignorowany.
-        i18n.init()
+        # napisy powstana w jezyku blednym. Sprzedajemy GUI po angielsku,
+        # wiec default='en': wybor uzytkownika z menu i PHOTOSCRUB_LANG
+        # maja pierwszenstwo, reszta dostaje angielski.
+        i18n.init(default='en')
         super().__init__()
         self.setWindowTitle('photoscrub')
         # GNOME: "smallest recommended display size for GNOME on desktop is
@@ -718,6 +720,7 @@ class Window(QtWidgets.QMainWindow):
         self._cards = {}
         self._last_w = self.width()
         self._recol_busy = False
+        self._restart = False
 
         c = QtWidgets.QWidget()
         self.setCentralWidget(c)
@@ -973,6 +976,13 @@ class Window(QtWidgets.QMainWindow):
         sm.addSeparator()
         sm.addAction(i18n.t('menu_phone2'), self._from_phone).setShortcut('Ctrl+M')
         sm.addAction(i18n.t('menu_theme2'), self.toggle_theme).setShortcut('Ctrl+T')
+        sm.addSeparator()
+        lm = sm.addMenu(i18n.t('menu_lang'))
+        for code in ('en', 'pl'):
+            a = lm.addAction('English' if code == 'en' else 'Polski',
+                             lambda c=code: self._set_language(c))
+            a.setCheckable(True)
+            a.setChecked(i18n.get_lang() == code)
         sm.addAction(i18n.t('menu_how2'), self._about).setShortcut('F1')
         return m
 
@@ -1433,6 +1443,18 @@ class Window(QtWidgets.QMainWindow):
             which=i18n.t('light') if self._theme_name == 'light'
             else i18n.t('dark')))
         self.status.setStyleSheet(f'color:{t["FG_MUTED"]}')
+
+    def _set_language(self, lang):
+        """Zmiana jezyka: zapis + restart. Przepisywanie calego drzewa
+        widgetow w locie to setki linii i miejsce na blad, a restart
+        trwa ulamek sekundy."""
+        if lang == i18n.get_lang():
+            return
+        i18n.save_lang(lang)
+        self._restart = True
+        app = QtWidgets.QApplication.instance()
+        app.closeAllWindows()
+        app.quit()
 
     def _restyle(self):
         """Przepuszcza widgety przez polish, zeby nowy QSS do nich dotarl
@@ -2481,7 +2503,14 @@ def main():
     apply_theme(app, _saved_theme())
     w = Window()
     w.show()
-    sys.exit(app.exec())
+    code = app.exec()
+    if getattr(w, '_restart', False):
+        # zmiana jezyka: startujemy od nowa z zapisanym wyborem
+        try:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        except OSError:
+            pass
+    sys.exit(code)
 
 
 def _save_theme(name):

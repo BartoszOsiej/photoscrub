@@ -242,6 +242,7 @@ EXTRA = {
     'btn_phone': ('Z telefonu', 'From phone'),
     'menu_phone2': ('Zdjecia z telefonu', 'Photos from phone'),
     'menu_theme2': ('Przelacz motyw', 'Switch theme'),
+    'menu_lang': ('Język', 'Language'),
     'menu_how2': ('Jak to dziala', 'How it works'),
     'menu_scan2': ('Skanuj ponownie', 'Scan again'),
     'menu_remove2': ('Usun metadane', 'Remove metadata'),
@@ -432,23 +433,33 @@ TABLES = {'pl': PL, 'en': EN}
 LANG = 'pl'
 
 
-def _detect():
-    """Jezyk z env, potem z systemu. Brak env -> polski."""
-    for var in ('PHOTOSCRUB_LANG', 'LC_ALL', 'LC_MESSAGES', 'LANG'):
+def _norm(v):
+    v = v.split(':')[0].split('.')[0].lower()        # en_US.UTF-8 -> en
+    if v in TABLES:
+        return v
+    if v.startswith('en'):
+        return 'en'
+    if v.startswith('pl'):
+        return 'pl'
+    return None
+
+
+def _env_lang():
+    """Twardy override: PHOTOSCRUB_LANG (dev, testy, CI)."""
+    v = os.environ.get('PHOTOSCRUB_LANG')
+    return _norm(v) if v else None
+
+
+def _sys_lang():
+    """Jezyk systemu: LANG/LC_* na Unixie, jezyk interfejsu na Windows."""
+    for var in ('LC_ALL', 'LC_MESSAGES', 'LANG'):
         v = os.environ.get(var)
-        if not v:
-            continue
-        v = v.split(':')[0].split('.')[0].lower()   # en_US.UTF-8 -> en
-        if v in TABLES:
-            return v
-        if v.startswith('en'):
-            return 'en'
-        if v.startswith('pl'):
-            return 'pl'
+        if v:
+            got = _norm(v)
+            if got:
+                return got
     # Windows nie zna zmiennej LANG - tam jedynym sygnalem jest jezyk
-    # interfejsu Windows. Aplikacja ze Sklepu startuje na komputerze
-    # uzytkownika (env z CI jej nie towarzyszy), wiec bez tego anglojezyczny
-    # klient dostawalby polski interfejs.
+    # interfejsu Windows.
     if os.name == 'nt':
         try:
             import ctypes
@@ -459,12 +470,55 @@ def _detect():
                 return 'pl'
         except Exception:
             pass
-    return 'pl'
+    return None
 
 
-def init(lang=None):
+def _pref_path():
+    return os.path.join(os.path.expanduser('~'), '.config', 'photoscrub',
+                        'lang')
+
+
+def _pref_lang():
+    """Wybor uzytkownika z menu (zapisywany na stalo)."""
+    try:
+        with open(_pref_path()) as f:
+            got = _norm(f.read().strip())
+        if got:
+            return got
+    except OSError:
+        pass
+    return None
+
+
+def save_lang(lang):
+    """Zapisuje wybor jezyka z menu - po restarcie program w nim startuje."""
+    if lang not in TABLES:
+        return False
+    try:
+        d = os.path.dirname(_pref_path())
+        os.makedirs(d, exist_ok=True)
+        with open(_pref_path(), 'w') as f:
+            f.write(lang)
+    except OSError:
+        pass
+    return True
+
+
+def _detect():
+    """Jezyk z env, potem z systemu. Brak -> polski (CLI)."""
+    return _env_lang() or _sys_lang() or 'pl'
+
+
+def init(lang=None, default=None):
+    """Ustawia jezyk.
+
+    *lang* - wymuszenie (testy). *default* - jezyk startowy, gdy ani env,
+    ani uzytkownik nic nie wybrali. GUI sprzedajemy po angielsku, wiec
+    Window przekazuje default='en': sprzedany program startuje po angielsku
+    niezaleznie od tego, na jakim komputerze stoi.
+    """
     global LANG
-    LANG = lang if lang in TABLES else _detect()
+    LANG = _env_lang() or _pref_lang() or default or _sys_lang() or 'pl'
     return LANG
 
 
