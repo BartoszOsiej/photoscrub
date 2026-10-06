@@ -281,6 +281,11 @@ jobs:
 
   msix:
     runs-on: windows-latest
+    # Jezyk package'u: testy w tym jobie po angielsku. Dzialanie binarki
+    # na komputerze klienta obsluguje i18n._detect() (jezyk interfejsu
+    # Windows) - env z CI jej nie towarzyszy przy starcie ze Sklepu.
+    env:
+      PHOTOSCRUB_LANG: en
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

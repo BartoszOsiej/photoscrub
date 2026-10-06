@@ -13,6 +13,7 @@ Jeśli kiedyś potrzebujesz cofnięcia klucza (zwrot w Polar), dojdzie serwer;
 na razie odwołanie jest tylko u Ciebie w ~/.secrets/photoscrub/issued.json.
 """
 import base64
+import i18n
 import hashlib
 import json
 import os
@@ -118,15 +119,15 @@ def verify(canonical, expect_product='photoscrub'):
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(PUBLIC_KEY_HEX)).verify(sig_b, payload_b)
         p = json.loads(payload_b)
     except InvalidSignature:
-        return False, 'podpis nieaktualny - klucz nie pochodzi z tego programu'
+        return False, i18n.tr('podpis nieaktualny - klucz nie pochodzi z tego programu')
     except (ValueError, KeyError, Exception) as e:
-        return False, f'klucz uszkodzony ({type(e).__name__})'
+        return False, i18n.tr('klucz uszkodzony ({err})', err=type(e).__name__)
     if p.get('p') != expect_product:
-        return False, 'ten klucz jest do innego produktu'
+        return False, i18n.tr('ten klucz jest do innego produktu')
     exp = p.get('e') or 0
     try:
         if exp and time.time() > float(exp):
-            return False, 'klucz wygasł'
+            return False, i18n.tr('klucz wygasł')
     except (TypeError, ValueError):
         pass
     return True, p
@@ -158,7 +159,8 @@ def activate(key):
     mid = payload.get('m')
     here = machine_id()[:16]
     if mid and mid != here:
-        return False, f'klucz aktywowany na innej maszynie ({mid[:8]}...)'
+        return False, i18n.tr('klucz aktywowany na innej maszynie ({mid})',
+                              mid=mid[:8] + '...')
     save(canonical)
     return True, payload
 
@@ -167,17 +169,18 @@ def state():
     """'ok' | 'grace' | powod blady. Zwraca (status, info, payload|None)."""
     blob = load()
     if not blob:
-        return 'brak', 'brak klucza', None
+        return 'brak', i18n.tr('brak klucza'), None
     ok, payload = verify(blob['key'])
     if not ok:
         return 'bledny', payload, None
     mid = payload.get('m')
     if mid and mid != machine_id()[:16]:
-        return 'bledny', 'klucz aktywowany na innej maszynie', None
+        return 'bledny', i18n.tr('klucz aktywowany na innej maszynie'), None
     age = time.time() - blob.get('saved_at', 0)
     if age < GRACE_SECONDS:
-        return 'ok', payload.get('o') or 'aktywny', payload
-    return 'grace', f'poza okresem grace ({(age - GRACE_SECONDS) / 86400:.0f} dni)', payload
+        return 'ok', payload.get('o') or i18n.tr('aktywny'), payload
+    return 'grace', i18n.tr('poza okresem grace ({days} dni)',
+                                days=f'{(age - GRACE_SECONDS) / 86400:.0f}'), payload
 
 
 def _cli(argv):

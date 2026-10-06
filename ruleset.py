@@ -18,6 +18,8 @@ Nie ukrywamy przed klientem, że reguły nowe są droższe — mówimy wprost
 w programie, co dokładnie dostaje.
 """
 
+import i18n
+
 V1 = 1
 V2 = 2
 
@@ -72,7 +74,7 @@ def supports(ruleset, detector):
 
 
 def promise(ruleset):
-    return RULES.get(ruleset, RULES[CURRENT])['promise']
+    return i18n.tr(RULES.get(ruleset, RULES[CURRENT])['promise'])
 
 
 def upgrades_available(purchased):
@@ -82,8 +84,9 @@ def upgrades_available(purchased):
             continue
         out.append({
             'version': v,
-            'name': RULES[v]['name'],
-            'promise': RULES[v]['promise'],
-            'new': UPGRADE_NOTES.get(v, []),
+            'name': i18n.tr(RULES[v]['name']),
+            'promise': i18n.tr(RULES[v]['promise']),
+            'new': [(i18n.tr(t), i18n.tr(d))
+                    for t, d in UPGRADE_NOTES.get(v, [])],
         })
     return out

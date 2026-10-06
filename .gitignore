@@ -8,3 +8,7 @@ nuitka-crash-report*.xml
 
 # bin/ trzyma skrypty startowe, nie binaria - budujemy w CI
 *.spec
+# Pakiet sklepowy budowany w CI (35 MB) - nie trafia do repo
+*.msix
+# Dane testowe wlasciciela (nazwy plikow zawieraja dane osobiste)
+testdata/

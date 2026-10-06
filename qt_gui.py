@@ -6,6 +6,7 @@ kolejności wywołań — stąd „okno dostaje 58 px i tekst zwija się do jedn
 i nie zna skali ekranu na Waylandzie (stąd „wszystko krzywe"). Qt ma oba rozwiązane
 od samego początku, do tego prawdziwe style, własny drag&drop i poprawne skalowanie.
 """
+import json
 import os
 import re
 import socket
@@ -432,10 +433,10 @@ class Card(QtWidgets.QFrame):
     def contextMenuEvent(self, e):
         # GNOME: "Menu / Shift+F10 - Open context menu for focused location"
         m = QtWidgets.QMenu(self)
-        a = m.addAction('Usun metadane z tego pliku')
+        a = m.addAction(i18n.t('ctx_clean_file'))
         a.triggered.connect(lambda: self.clean_one.emit(self.rep))
         m.addSeparator()
-        m.addAction('Pokaz sciezke').triggered.connect(
+        m.addAction(i18n.t('ctx_show_path')).triggered.connect(
             lambda: QtWidgets.QApplication.clipboard().setText(self.rep.path))
         m.exec(e.globalPos())
 
@@ -695,13 +696,10 @@ class _ScrollFilter(QtCore.QObject):
 
 class Window(QtWidgets.QMainWindow):
     def __init__(self):
-        # Jezyk musi byc znany PRZED budowa widgetow - inaczej wszystkie
-        # napisy powstana w jezyku domyslnym, a PHOTOSCRUB_LANG zignorowany.
+        # Jezyk musi byc znany PRZED budowa widgetow — inaczej wszystkie
+        # napisy powstaną w języku domyślnym, a PHOTOSCRUB_LANG zignorowany.
         i18n.init()
         super().__init__()
-        # Jezyk musi byc znany PRZED budowa widgetow, inaczej
-        # wszystkie napisy powstana w jezyku domyslnym.
-        i18n.init()
         self.setWindowTitle('photoscrub')
         # GNOME: "smallest recommended display size for GNOME on desktop is
         # currently 1024x600px, and this size should be supported by all apps".
@@ -882,7 +880,7 @@ class Window(QtWidgets.QMainWindow):
         n = QtWidgets.QLabel('photoscrub')
         n.setObjectName('brand')
         names.addWidget(n)
-        tg = QtWidgets.QLabel('zanim wrzucisz to do sieci')
+        tg = QtWidgets.QLabel(i18n.t('tagline'))
         tg.setObjectName('tagline')
         names.addWidget(tg)
         h.addLayout(names)
@@ -905,7 +903,7 @@ class Window(QtWidgets.QMainWindow):
         self._theme_btn.setProperty('variant', 'ghost')
         self._theme_btn.setFixedWidth(36)
         self._theme_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        self._theme_btn.setToolTip('Jasny / ciemny motyw (Ctrl+T)')
+        self._theme_btn.setToolTip(i18n.t('theme_tooltip'))
         self._theme_btn.clicked.connect(self.toggle_theme)
         h.addWidget(self._theme_btn)
         self._paint_theme_icon()
@@ -913,7 +911,7 @@ class Window(QtWidgets.QMainWindow):
         phone = QtWidgets.QPushButton(i18n.t('btn_phone'))
         phone.setProperty('variant', 'ghost')
         phone.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        phone.setToolTip('Wyslij zdjecia z iPhone albo Androida (Ctrl+M)')
+        phone.setToolTip(i18n.t('phone_tooltip'))
         phone.clicked.connect(self._from_phone)
         h.addWidget(phone)
         about = QtWidgets.QPushButton('?')
@@ -959,14 +957,14 @@ class Window(QtWidgets.QMainWindow):
         # pasek jest wlasciwie niewidoczny (tlo = tlo aplikacji, brak ramek),
         # a jego rola to F10 + skroty. GNOME: "F10 - open primary menu".
         m.setNativeMenuBar(False)
-        f = m.addMenu('&Plik')
+        f = m.addMenu(i18n.t('menu_file'))
         a = f.addAction(i18n.t('add_files'), self.add_files)
         a.setShortcut('Ctrl+O')
         a = f.addAction(i18n.t('add_folder'), self.add_folder)
         a.setShortcut('Ctrl+Shift+D')
         f.addSeparator()
         f.addAction(i18n.t('close'), self.close).setShortcut('Ctrl+Q')
-        sm = m.addMenu('&Akcje')
+        sm = m.addMenu(i18n.t('menu_actions'))
         a = sm.addAction(i18n.t('scan_again'),
                          lambda: self.add_paths([r.path for r, _ in self.rows]))
         a.setShortcut('Ctrl+R')
@@ -1028,8 +1026,7 @@ class Window(QtWidgets.QMainWindow):
         self.file_name.setText('—')
         self.file_meta.setText('')
         self.detail.setHtml(
-            f'<p style="color:{FAINT}">Kliknij kartę zdjęcia, żeby zobaczyć, '
-            'co dokładnie ujawnia i dlaczego to problem.</p>')
+            f'<p style="color:{FAINT}">{i18n.t("click_photo_card")}</p>')
 
     def _about(self):
         d = QtWidgets.QDialog(self)
@@ -1045,17 +1042,12 @@ class Window(QtWidgets.QMainWindow):
         b = QtWidgets.QTextBrowser()
         b.setObjectName('detail')
         b.setHtml(
-            f'<p>photoscrub czyta <b>bajty pliku</b> i <b>DNS</b> — nic więcej. '
-            'Nie ma skanowania, nie ma konta, nie ma połączenia z serwerem.</p>'
-            f'<p>Oryginałów nigdy nie modyfikujemy. Zapisujemy czyste kopie '
-            'w innym folderze.</p>'
-            f'<p>Najbardziej podstępny wyciek to miniaturka wbudowana w JPEG — '
-            'często jest w niej całe oryginalne zdjęcie, w rozdzielczości pełnej.</p>'
-            f'<p>Wynik ryzyka (0–100) liczy nasz własny model: 15 cech pliku, '
-            'klasyfikator logistyczny wytrenowany na 8000 syntetycznych '
-            'profilach. To nie jest model językowy — nie zmyśla, liczy.</p>')
+            i18n.t('how_it_works_intro')
+            + i18n.t('how_it_works_originals')
+            + i18n.t('how_it_works_thumb')
+            + i18n.t('how_it_works_score'))
         v.addWidget(b, 1)
-        ok = QtWidgets.QPushButton('Rozumiem')
+        ok = QtWidgets.QPushButton(i18n.t('understood'))
         ok.setProperty('variant', 'solid')
         ok.clicked.connect(d.accept)
         v.addWidget(ok)
@@ -1080,30 +1072,29 @@ class Window(QtWidgets.QMainWindow):
         if st in ('ok', 'grace'):
             ups = rs.upgrades_available(rv)
             if st == 'grace':
-                self.status.setText(f'poza okresem grace: {info}')
+                self.status.setText(i18n.t('license_grace', info=info))
                 self.status.setStyleSheet(f'color:{AMB}')
             elif ups:
                 u = ups[0]
+                items = ' · '.join(n for n, _ in u['new'][:3])
                 self.status.setText(
-                    i18n.t('rules_newer', rv=rv, u=u['version'], items=items)
-                    + ' · '.join(n for n, _ in u['new'][:3]))
+                    i18n.t('rules_newer', rv=rv, u=u['version'], items=items))
                 self.status.setStyleSheet(f'color:{AMB}')
             else:
                 self.status.setText(i18n.t('license_active', rv=rv))
                 self.status.setStyleSheet(f'color:{GRN}')
             return
-        self._activate(info if st != 'brak' else 'Wklej klucz, który dostałeś '
-                                               'mailem.')
+        self._activate(info if st != 'brak' else i18n.t('key_paste_msg'))
 
     def _activate(self, message):
         d = QtWidgets.QDialog(self)
-        d.setWindowTitle('photoscrub — aktywacja')
+        d.setWindowTitle(i18n.t('license_title'))
         d.setModal(True)
         d.setFixedWidth(560)
         v = QtWidgets.QVBoxLayout(d)
         v.setContentsMargins(28, 28, 28, 28)
         v.setSpacing(12)
-        t = QtWidgets.QLabel('Klucz aktywacyjny')
+        t = QtWidgets.QLabel(i18n.t('activation_key'))
         t.setObjectName('dlgTitle')
         v.addWidget(t)
         m = QtWidgets.QLabel(message)
@@ -1116,12 +1107,12 @@ class Window(QtWidgets.QMainWindow):
         v.addWidget(e)
         row = QtWidgets.QHBoxLayout()
         row.setSpacing(8)
-        paste = QtWidgets.QPushButton('Wklej ze schowka')
+        paste = QtWidgets.QPushButton(i18n.t('paste_clipboard'))
         paste.clicked.connect(lambda: e.insertPlainText(
             QtWidgets.QApplication.clipboard().text()))
         row.addWidget(paste)
         row.addStretch(1)
-        ok = QtWidgets.QPushButton('Aktywuj')
+        ok = QtWidgets.QPushButton(i18n.t('activate'))
         ok.setProperty('variant', 'solid')
         row.addWidget(ok)
         v.addLayout(row)
@@ -1129,7 +1120,7 @@ class Window(QtWidgets.QMainWindow):
         out.setStyleSheet(f'color:{RED};')
         out.setWordWrap(True)
         v.addWidget(out)
-        hint = QtWidgets.QLabel(f'twoja maszyna: {lic.machine_id()[:16]}')
+        hint = QtWidgets.QLabel(i18n.t('your_machine', id=lic.machine_id()[:16]))
         hint.setObjectName('hint')
         v.addWidget(hint)
 
@@ -1153,9 +1144,7 @@ class Window(QtWidgets.QMainWindow):
 
     def add_files(self):
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
-            self, i18n.t('choose_files'), '',
-            'Zdjęcia i filmy (*.jpg *.jpeg *.png *.tif *.tiff *.webp *.heic '
-            '*.heif *.avif *.gif *.bmp *.mp4 *.mov *.m4v);;Wszystkie pliki (*)')
+            self, i18n.t('choose_files'), '', i18n.t('file_filter'))
         if paths:
             self.add_paths(paths)
 
@@ -1273,8 +1262,7 @@ class Window(QtWidgets.QMainWindow):
         if not rows:
             self.title.setText(i18n.t('see_what_your_photos_reveal'))
             self.title.setStyleSheet(f'color:{FG}')
-            self.subtitle.setText('Paswywnie i offline. Oryginały zostają tam, '
-                                  'gdzie są.')
+            self.subtitle.setText(i18n.t('passive_offline'))
             for k in self.stat_vals:
                 self._set_stat(k, 0)
             self.cta.setEnabled(False)
@@ -1440,9 +1428,10 @@ class Window(QtWidgets.QMainWindow):
         self._render()          # karty musza dostac nowe kolory
         if self.selected:
             self.show_detail(self.selected, True)
-        self.status.setText('Motyw: '
-                            + ('jasny' if self._theme_name == 'light'
-                               else 'ciemny'))
+        self.status.setText(i18n.t(
+            'theme_status',
+            which=i18n.t('light') if self._theme_name == 'light'
+            else i18n.t('dark')))
         self.status.setStyleSheet(f'color:{t["FG_MUTED"]}')
 
     def _restyle(self):
@@ -1472,12 +1461,10 @@ class Window(QtWidgets.QMainWindow):
         v.setContentsMargins(24, 24, 24, 24)
         v.setSpacing(12)
 
-        t = QtWidgets.QLabel('Wyślij zdjęcia z telefonu')
+        t = QtWidgets.QLabel(i18n.t('phone_title2'))
         t.setObjectName('dlgTitle')
         v.addWidget(t)
-        sub = QtWidgets.QLabel(
-            'Telefon otworzy zwykłą stronę i sam poprosi o dostęp do '
-            'galerii. Nic nie wychodzi poza twoją sieć domową.')
+        sub = QtWidgets.QLabel(i18n.t('phone_sub'))
         sub.setObjectName('subtitle')
         sub.setWordWrap(True)
         v.addWidget(sub)
@@ -1488,8 +1475,9 @@ class Window(QtWidgets.QMainWindow):
         self._qr_pixmap(urls[0])
         qr.setPixmap(self._qr)
 
-        self._phone_link = QtWidgets.QLabel(urls[0].replace('?t=', '  klucz: ')
-                                            .replace('http://', ''))
+        self._phone_link = QtWidgets.QLabel(
+            urls[0].replace('?t=', '  ' + i18n.t('link_key'))
+                   .replace('http://', ''))
         self._phone_link.setObjectName('hint')
         self._phone_link.setTextInteractionFlags(
             QtCore.Qt.TextSelectableByMouse)
@@ -1501,7 +1489,7 @@ class Window(QtWidgets.QMainWindow):
         # je wszystkie, bo telefon moze byc w innej podsieci niz laptop.
         lan = [u for u in urls if '127.0.0.1' not in u]
         if len(lan) > 1:
-            alt = QtWidgets.QLabel('Inne adresy: ' + '   '.join(
+            alt = QtWidgets.QLabel(i18n.t('other_addresses') + '   '.join(
                 u.replace('http://', '').split('?')[0] for u in lan[1:]))
             alt.setObjectName('hint')
             alt.setWordWrap(True)
@@ -1521,16 +1509,13 @@ class Window(QtWidgets.QMainWindow):
             lambda: QtWidgets.QApplication.clipboard().setText(urls[0]))
         row.addWidget(copy)
         row.addStretch(1)
-        scan = QtWidgets.QPushButton('Skanuj teraz')
+        scan = QtWidgets.QPushButton(i18n.t('scan_now'))
         scan.setProperty('variant', 'solid')
         scan.clicked.connect(self._scan_phone)
         row.addWidget(scan)
         v.addLayout(row)
 
-        hint = QtWidgets.QLabel(
-            'Telefon i komputer muszą być w tej samej sieci Wi-Fi. '
-            'Link działa tylko na twoim komputerze — klucz w adresie '
-            'chroni przed wysłaniem plików przez inne programy w sieci.')
+        hint = QtWidgets.QLabel(i18n.t('phone_wifi_hint'))
         hint.setObjectName('hint')
         hint.setWordWrap(True)
         v.addWidget(hint)
@@ -1622,7 +1607,7 @@ class Window(QtWidgets.QMainWindow):
         try:
             os.makedirs(out, exist_ok=True)
         except OSError as e:
-            self.toast.show_toast('Nie udalo sie utworzyc folderu', str(e),
+            self.toast.show_toast(i18n.t('mkdir_failed'), str(e),
                                   'err', 6000)
             return
         try:
@@ -1631,14 +1616,13 @@ class Window(QtWidgets.QMainWindow):
             ps.scrub_image(rep.path, dst)
             freed = max(0, before - os.path.getsize(dst))
         except Exception as e:
-            self.toast.show_toast('Nie udalo sie wyczyscic pliku',
+            self.toast.show_toast(i18n.t('clean_file_failed'),
                                   f'{os.path.basename(rep.path)}: {e}',
                                   'err', 7000)
             return
         self.toast.show_toast(
-            'Gotowe',
-            f'Czysta kopia w:\n{dst}\nOryginal nietknięty, '
-            f'oszczędność {human(freed)} metadanych.', 'ok', 7000)
+            i18n.t('clean_done'),
+            i18n.t('copy_ready', dst=dst, freed=human(freed)), 'ok', 7000)
         card = self._cards.get(rep.path)
         if card:
             card.setEnabled(False)
@@ -1659,26 +1643,24 @@ class Window(QtWidgets.QMainWindow):
                 default = None
         if default is None:
             default = QtWidgets.QFileDialog.getExistingDirectory(
-                self, 'Zapisz czyste kopie TUTAJ (inny folder niż zdjęcia)')
+                self, i18n.t('save_here_title'))
             if not default:
                 return
         if os.path.realpath(default) in {
                 os.path.realpath(os.path.dirname(r.path)) for r in dirty}:
             self.toast.show_toast(
-                'Zatrzymane',
-                'To jest ten sam folder ze zdjęciami. Wybierz inny — oryginały '
-                'nigdy nie są nadpisywane.', 'err', 7000)
+                i18n.t('stopped'), i18n.t('same_folder'), 'err', 7000)
             return
         self.cta.setEnabled(False)
         self.progress.show()
         self.progress.setValue(0)
         n = len(dirty)
-        self.status.setText(f'Usuwam… 0/{n}')
+        self.status.setText(i18n.t('removing', done=0, total=n))
         self.status.setStyleSheet(f'color:{DIM}')
 
         # Anulowanie: okno zostaje responsywne, wiec dajemy userowi wyjscie
         self._clean_abort = False
-        self._cancel = QtWidgets.QPushButton('Zatrzymaj')
+        self._cancel = QtWidgets.QPushButton(i18n.t('stop'))
         self._cancel.setProperty('variant', 'ghost')
         self._cancel.clicked.connect(self._abort_clean)
         self.foot_extra.addWidget(self._cancel)
@@ -1692,14 +1674,14 @@ class Window(QtWidgets.QMainWindow):
     def _abort_clean(self):
         self._clean_abort = True
         self._cancel.setEnabled(False)
-        self.status.setText('Zatrzymuję po bieżącym pliku…')
+        self.status.setText(i18n.t('stopping_now'))
         self.status.setStyleSheet(f'color:{AMB}')
 
     def _on_clean_progress(self, done, total):
         if self._clean_abort:
             return
         self.progress.setValue(int(done / max(1, total) * 100))
-        self.status.setText(f'Usuwam… {done}/{total}')
+        self.status.setText(i18n.t('removing', done=done, total=total))
         self.status.setStyleSheet(f'color:{DIM}')
 
     def _cleaned(self, done, failed, out, freed):
@@ -1713,15 +1695,15 @@ class Window(QtWidgets.QMainWindow):
         aborted = self._clean_abort
         self._clean_abort = False
         if aborted:
-            failed = list(failed) + ['zatrzymano przez uzytkownika']
+            failed = list(failed) + [i18n.t('aborted_by_user')]
         self.rows = []
         self.selected = None
         self._render()
         self._reset_detail()
-        self.title.setText('Gotowe')
+        self.title.setText(i18n.t('clean_done'))
         self.title.setStyleSheet(f'color:{GRN}')
-        self.subtitle.setText(f'Kopie w {out} — oryginały nietknięte, '
-                              f'z metadanych zniknęło {human(freed)}.')
+        self.subtitle.setText(i18n.t('clean_done_toast',
+                                     out=out, freed=human(freed)))
         self.status.setText(i18n.t('clean_count', done=done, out=self.out))
         self.status.setStyleSheet(f'color:{GRN}')
         if failed:
@@ -1729,8 +1711,8 @@ class Window(QtWidgets.QMainWindow):
                 i18n.t('clean_summary', done=done, failed=len(failed)),
                 '\n'.join(failed[:4]), 'warn', 8000)
         else:
-            self.toast.show_toast('Gotowe',
-                                  f'{done} plików zapisanych w:\n{out}', 'ok')
+            self.toast.show_toast(i18n.t('clean_done'),
+                                  f'{done} {i18n.t("files_in")}:\n{out}', 'ok')
 
 
 class ScanWorker(QtCore.QObject):
@@ -1778,8 +1760,8 @@ class CleanWorker(QtCore.QThread):
     def _one(self, r):
         """Czysci jeden plik. Wywolywane z wielu watkow."""
         if r.kind == 'video':
-            return (f'{os.path.basename(r.path)} — wideo (reguły v'
-                    f'{self.ruleset} nie czyścią wideo)'), 0
+            return i18n.t('video_not_scrubbed',
+                          name=os.path.basename(r.path), rv=self.ruleset), 0
         try:
             dst = ps.safe_dst(r.path, self.out)
             before = r.size
@@ -1818,10 +1800,10 @@ class CleanWorker(QtCore.QThread):
 #  działa na iPhone i Android bez instalacji czegokolwiek.
 # ═══════════════════════════════════════════════════════════════════════════
 PHONE_PAGE = """<!doctype html>
-<html lang="pl"><head>
+<html lang="{{lang}}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>photoscrub — wyślij zdjęcia</title>
+<title>{{pp_title}}</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -1851,19 +1833,18 @@ PHONE_PAGE = """<!doctype html>
   #list div { padding:2px 0; }
 </style></head><body>
 <div class="card">
-  <h1>Wyślij zdjęcia</h1>
-  <p class="sub">Wybierz pliki w galerii telefonu. Trafią prosto na komputer,
-     bez chmury i bez wysyłania gdziekolwiek.</p>
-  <label class="btn" for="f">Wybierz z galerii</label>
+  <h1>{{pp_h1}}</h1>
+  <p class="sub">{{pp_sub}}</p>
+  <label class="btn" for="f">{{pp_pick}}</label>
   <input type="file" id="f" accept="image/*,video/*" multiple>
-  <div id="count">Czekam na pliki…</div>
+  <div id="count">{{pp_waiting}}</div>
   <div id="bar"><i id="barfill"></i></div>
   <div id="list"></div>
-  <div class="warn">Zwykłe zdjęcia z telefonu nie mają metadanych EXIF.
-     Jeśli chcesz sprawdzić w oryginale, włącz „Użyj oryginałów” w aplikacji
-     aparatu przed wysłaniem.</div>
+  <div class="warn">{{pp_warn}}</div>
 </div>
 <script>
+const I18N = {{pp_i18n}};
+function F(s, o) { for (const k in o) s = s.split('{'+k+'}').join(o[k]); return s; }
 const f = document.getElementById('f'), c = document.getElementById('count'),
       l = document.getElementById('list'), bar = document.getElementById('bar'),
       fill = document.getElementById('barfill');
@@ -1883,7 +1864,7 @@ const mb = b => (b / 1048576).toFixed(1) + ' MB';
 function upload(file) {
   return new Promise((resolve, reject) => {
     if (file.size > MAX) {
-      const e = new Error('plik za duży (' + mb(file.size) + ' > ' + mb(MAX) + ')');
+      const e = new Error(F(I18N.too_big, {a: mb(file.size), b: mb(MAX)}));
       log('✗ ' + file.name + ' — ' + e.message, 'err');
       return reject(e);
     }
@@ -1899,11 +1880,10 @@ function upload(file) {
       if (!ev.lengthComputable) return;
       const pc = ev.loaded / ev.total * 100;
       fill.style.width = pc + '%';
-      c.textContent = 'Wysyłam ' + file.name + ' — ' + mb(ev.loaded)
-                    + ' z ' + mb(ev.total) + ' (' + Math.round(pc) + '%)';
+      c.textContent = F(I18N.sending, {name: file.name, loaded: mb(ev.loaded), total: mb(ev.total), pc: Math.round(pc)});
     };
-    x.onerror = () => reject(new Error('cannot reach your computer'));
-    x.ontimeout = () => reject(new Error('przekroczono czas'));
+    x.onerror = () => reject(new Error(F(I18N.unreach, {})));
+    x.ontimeout = () => reject(new Error(F(I18N.timeout, {})));
     x.onload = () => {
       let j = {}; try { j = JSON.parse(x.responseText); } catch (e) {}
       if (x.status !== 200 || j.error) {
@@ -1931,10 +1911,28 @@ f.onchange = async () => {
   }
   bar.style.display = 'none';
   c.className = errs.length ? 'err' : 'ok';
-  c.textContent = 'Na komputerze: ' + out.length + ' z ' + files.length + ' plików'
-                + (errs.length ? ', nie udało się: ' + errs.length : '');
+  c.textContent = F(I18N.done, {done: out.length, total: files.length})
+                + (errs.length ? F(I18N.fail, {n: errs.length}) : '');
 };
 </script></body></html>"""
+
+
+
+def phone_page():
+    """HTML serwowany telefonowi. Wszystkie napisy tluaczymy TU - przegladarka
+    nie ma modulu i18n, wiec gotowy JSON z tekstami leci jako token."""
+    page = PHONE_PAGE.replace('{{lang}}', i18n.get_lang())
+    for key in ('pp_title', 'pp_h1', 'pp_sub', 'pp_pick', 'pp_waiting',
+                'pp_warn'):
+        page = page.replace('{{' + key + '}}', i18n.t(key))
+    return page.replace('{{pp_i18n}}', json.dumps({
+        'too_big': i18n.t('pp_too_big'),
+        'sending': i18n.t('pp_sending'),
+        'done': i18n.t('pp_done'),
+        'fail': i18n.t('pp_failed'),
+        'timeout': i18n.t('pp_timeout'),
+        'unreach': i18n.t('pp_unreach'),
+    }, ensure_ascii=False))
 
 
 def firewall_blocks(port):
@@ -2268,32 +2266,36 @@ def start_phone_server(on_files, port=8765):
             u = urllib.parse.urlparse(self.path)
             q = urllib.parse.parse_qs(u.query)
             if u.path in ('/', '/i') and self._token_ok(q.get('t', [''])[0]):
-                self._send(200, PHONE_PAGE.encode())
+                self._send(200, phone_page().encode())
             else:
-                self._send(404, 'Nie. Otwórz link z programu.'.encode())
+                self._send(404, i18n.t('not_found').encode())
 
         def do_POST(self):
             u = urllib.parse.urlparse(self.path)
             if u.path != '/upload':
-                return self._send(404, b'nope', 'text/plain; charset=utf-8')
+                return self._send(404, json.dumps(
+                    {'error': i18n.t('not_found')}).encode(),
+                    'application/json')
             # token z naglowka (strona go wysyla) albo z zapytania — oba
             # sprawdzamy, bo strona moze byc stara i token wchodzi w query
             given = self.headers.get('X-Photoscrub-Token') \
                 or urllib.parse.parse_qs(u.query).get('t', [''])[0]
             if not self._token_ok(given):
                 return self._send(403, json.dumps(
-                    {'error': 'zly klucz — otworz link z programu'}).encode(),
+                    {'error': i18n.t('bad_key')}).encode(),
                     'application/json')
 
             ctype = self.headers.get('Content-Type', '')
             m = re.search(r'boundary=("?)([^";,]+)\1', ctype)
             if not m:
-                return self._send(400, b'brak boundary',
-                                  'text/plain; charset=utf-8')
+                return self._send(400, json.dumps(
+                    {'error': i18n.t('no_boundary')}).encode(),
+                    'application/json')
             boundary = m.group(2).strip().encode('utf-8')
             if not boundary or len(boundary) > 200:
-                return self._send(400, b'zly boundary',
-                                  'text/plain; charset=utf-8')
+                return self._send(400, json.dumps(
+                    {'error': i18n.t('bad_boundary')}).encode(),
+                    'application/json')
 
             state = {'fh': None, 'path': None, 'size': 0, 'names': [],
                      'total': 0}
@@ -2372,12 +2374,12 @@ def start_phone_server(on_files, port=8765):
                 code = str(e)
                 if code == 'brak folderu':
                     return self._send(500, json.dumps(
-                        {'error': 'brak folderu docelowego'}).encode(),
+                        {'error': i18n.t('no_dest_folder')}).encode(),
                         'application/json')
                 if code in ('size', 'za duzo'):
-                    msg, st = 'plik za duży — limit to 512 MB', 413
+                    msg, st = i18n.t('too_big'), 413
                 elif code == 'empty':
-                    msg, st = 'puste żądanie — wybierz pliki', 400
+                    msg, st = i18n.t('empty_request'), 400
                 else:
                     msg, st = i18n.t('upload_read_fail'), 400
                 return self._send(st, json.dumps({'error': msg}).encode(),
@@ -2385,12 +2387,12 @@ def start_phone_server(on_files, port=8765):
             except Exception:
                 close_part()
                 return self._send(400, json.dumps(
-                    {'error': 'przerwane wysyłanie'}).encode(),
+                    {'error': i18n.t('upload_interrupted')}).encode(),
                     'application/json')
 
             if not state['names']:
                 return self._send(400, json.dumps(
-                    {'error': 'brak plikow — wybierz zdjecia w galerii'}).encode(),
+                    {'error': i18n.t('no_files_picked')}).encode(),
                     'application/json')
             self._send(200, json.dumps(
                 {'saved': len(state['names']), 'files': state['names']}).encode(),

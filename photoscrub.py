@@ -20,6 +20,9 @@ from dataclasses import dataclass, asdict, field
 
 from PIL import Image, ExifTags, ImageFile
 
+import i18n
+from i18n import tr
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 try:  # zdjecia z iPhone'a (HEIC/HEIF) - bez tego polowa aparatów jest nieczytelna
@@ -54,6 +57,11 @@ class Finding:
     value: str
     risk: str = 'LOW'
     why: str = ''
+
+    def __post_init__(self):
+        # why jest statyczne i po polsku (RISK, stale opisy) - tlumacze przy
+        # tworzeniu, wiec kazdy Finding w programie ma juz gotowy tekst.
+        self.why = tr(self.why)
 
 
 @dataclass
@@ -169,7 +177,7 @@ def scan_image(path):
         with open(path, 'rb') as fh:
             head = fh.read(65536)
     except OSError as e:
-        rep.note = f'nie mozna odczytac: {e}'
+        rep.note = tr('nie mozna odczytac: {err}', err=e)
         rep.cleanable = False
         return rep
     buf, complete = read_for_scan(path)
@@ -187,7 +195,7 @@ def scan_image(path):
             except Exception as e:
                 ll = None
             f.append(Finding('gps', f'{ll[0]}, {ll[1]}' if ll
-                             else f'wspolrzedne obecne ({type(e).__name__})', *RISK['gps']))
+                             else tr('wspolrzedne obecne ({err})', err=type(e).__name__), *RISK['gps']))
         for tag, val in list(ifd0.items()) + list(sub.items()):
             nm = _name(tag)
             if nm in ('BodySerialNumber', 'SerialNumber'):
@@ -207,42 +215,42 @@ def scan_image(path):
         if im.info.get('Software') and not any(x.kind == 'software' for x in f):
             f.append(Finding('software', str(im.info['Software']), *RISK['software']))
         if has_thumb:
-            f.append(Finding('thumbnail', f'{thumb_bytes} B miniatureki w pliku',
+            f.append(Finding('thumbnail', tr('{n} B miniatureki w pliku', n=thumb_bytes),
                              *RISK['thumbnail']))
         # ── warstwa 2: chunky, ktorych getexif() nie czyta ──
         for label, val in xmp_packets(path, buf):
             kind = 'gps' if 'GPS' in label else ('comment' if 'Source' in label else 'software')
-            f.append(Finding(kind, f'{label}: {val}',
+            f.append(Finding(kind, f'{tr(label)}: {tr(val)}',
                              'HIGH' if kind == 'gps' else 'LOW',
                              'XMP jest drugim miejscem na dane - i czesto bogatszym '
                              'niz EXIF, a wiec usucie tagow nie wystarczy'))
         for label, val in iptc_fields(path, buf):
             kind = 'gps' if label.startswith(('IPTC City', 'IPTC Country')) else 'comment'
-            f.append(Finding(kind, f'{label}: {val}',
+            f.append(Finding(kind, f'{tr(label)}: {tr(val)}',
                              'HIGH' if kind == 'gps' else 'LOW',
                              'IPTC to pole redakcyjne - imie, miasto, kraj'))
         for label, val in png_text_chunks(path, buf):
-            f.append(Finding('comment', f'{label}: {val}', 'LOW',
+            f.append(Finding('comment', f'{tr(label)}: {tr(val)}', 'LOW',
                              'chunk tekstowy PNG - autor, opis, komentarz'))
         for label, val in jpeg_comments(path, buf):
-            f.append(Finding('comment', f'{label}: {val}', 'LOW',
+            f.append(Finding('comment', f'{tr(label)}: {tr(val)}', 'LOW',
                              'komentarz w pliku - widoczny dla kazdego kto go otworzy'))
         for label, val in gif_comments(path, buf):
-            f.append(Finding('comment', f'{label}: {val}', 'LOW',
+            f.append(Finding('comment', f'{tr(label)}: {tr(val)}', 'LOW',
                              'komentarz GIF - nieobslugiwany przez wiekszosc edytorow'))
         for label, val in maker_note_risk(path, buf):
             high = 'wspolrzedne' in val or 'miast' in val or 'GPS' in val
-            f.append(Finding('gps' if high else 'software', f'{label}: {val}',
+            f.append(Finding('gps' if high else 'software', f'{tr(label)}: {tr(val)}',
                              'HIGH' if high else 'MED',
                              'MakerNote jest polem binarnym - wiekszosc narzedzi go nie czyta, '
                              'a producenci zapisuja tam lokalizacje i tryb pracy'))
         for label, val in sniff_exif_bytes(path, buf):
-            f.append(Finding('gps', f'{label}: {val}', 'HIGH',
+            f.append(Finding('gps', f'{tr(label)}: {tr(val)}', 'HIGH',
                              'wspolrzedne zapisane tekstem wewnatrz pliku, '
                              'poza widocznymi tagami'))
         rep.findings = f
     except Exception as e:
-        rep.note = f'parser: {type(e).__name__}: {e}'
+        rep.note = tr('parser: {name}: {err}', name=type(e).__name__, err=e)
         rep.cleanable = False
     return rep
 
@@ -277,10 +285,11 @@ def maker_note_risk(path, buf=None):
     if idx == -1:
         return out
     blob = data[min(idx, len(data) - 1): idx + 20000]
-    out.append(('MakerNote', f'{len(blob)} B nieparsowanego bloku producenta'))
+    out.append(('MakerNote', tr('{n} B nieparsowanego bloku producenta',
+                                    n=len(blob))))
     for rx, why in MAKER_HINTS:
         if rx.search(blob):
-            out.append(('MakerNote', why))
+            out.append(('MakerNote', tr(why)))
     return out
 
 
@@ -309,8 +318,9 @@ def sniff_exif_bytes(path, buf=None):
     seg = data[max(0, start - 8): start + 131072]
     m = _COORD_RX.search(seg)
     if m:
-        out.append(('surowe bajty', f'wspolrzedne w tekście: {m.group(1).decode()}, '
-                                    f'{m.group(2).decode()}'))
+        out.append(('surowe bajty', tr('wspolrzedne w tekście: {lat}, {lon}',
+                                       lat=m.group(1).decode(),
+                                       lon=m.group(2).decode())))
     return out
 
 
@@ -345,16 +355,18 @@ def png_text_chunks(path, buf=None):
             if printable < 0.75:
                 head = ''.join(ch for ch in txt[:60] if 32 <= ord(ch) < 127).strip()
                 out.append(('PNG ' + (key or typ),
-                            f'{len(raw)} B danych binarnych w polu tekstowym'
-                            + (f' (zaczyna sie od: {head!r})' if head else '')))
+                            tr('{n} B danych binarnych w polu tekstowym', n=len(raw))
+                            + (tr(' (zaczyna sie od: {head})', head=repr(head))
+                               if head else '')))
             elif txt:
                 out.append(('PNG ' + (key or typ), txt[:160]))
         if typ == 'eXIf' and payload:
-            out.append(('PNG eXIf', f'{len(payload)} B bloku EXIF (jak zwykly JPEG)'))
+            out.append(('PNG eXIf', tr('{n} B bloku EXIF (jak zwykly JPEG)', n=len(payload))))
         if typ == 'iCCP' and payload:
-            out.append(('PNG iCCP', f'profil ICC {len(payload)} B (nazwa, sRGB/P3/Display P3)'))
+            out.append(('PNG iCCP', tr('profil ICC {n} B (nazwa, sRGB/P3/Display P3)',
+                                     n=len(payload))))
         if typ == 'tIME':
-            out.append(('PNG tIME', 'data i czas modyfikacji w pliku'))
+            out.append(('PNG tIME', tr('data i czas modyfikacji w pliku')))
         if typ == 'IEND':
             break
         i += 12 + ln
@@ -388,7 +400,7 @@ def xmp_packets(path, buf=None):
                            ('dc:creator', 'XMP tworca'),
                            ('crs:Version', 'XMP wersja programu')):
             if tag in chunk:
-                out.append((label, f'jest w dokumencie ({tag})'))
+                out.append((label, tr('jest w dokumencie ({tag})', tag=tag)))
         if 'exif:GPS' in chunk or 'GPSLatitude' in chunk:
             out.append(('XMP GPS', 'wspolrzedne w XMP, nie tylko w EXIF'))
         if 'photoshop:Instructions' in chunk or 'photoshop:Source' in chunk:
@@ -543,14 +555,14 @@ def trailing_data(path, buf=None, complete=True):
         return out
     t = tail[:400000].lower()
     if b'v=spf1' in t or b'<?xpacket' in t or b'8bim' in t:
-        kind = 'caly blok EXIF/XMP/IPTC za koncem pliku'
+        kind = tr('caly blok EXIF/XMP/IPTC za koncem pliku')
     elif t.startswith(b'\xff\xd8') or b'\x00\xff\xd8\xff' in t:
-        kind = 'caly drugi obraz ukryty za koncem pliku'
+        kind = tr('caly drugi obraz ukryty za koncem pliku')
     elif b'http' in t or b'<' in t:
-        kind = 'fragmenty HTML/tekstu za koncem pliku'
+        kind = tr('fragmenty HTML/tekstu za koncem pliku')
     else:
-        kind = 'bajty o nieznanym formacie'
-    out.append((f'PO OBRAZIE: {len(tail)} B', kind))
+        kind = tr('bajty o nieznanym formacie')
+    out.append((tr('PO OBRAZIE: {n} B', n=len(tail)), kind))
     return out
 
 
@@ -573,11 +585,12 @@ def video_gps(path):
         if idx != -1:
             frag = data[idx:idx + 120]
             if any(c.isdigit() for c in frag.decode('latin1', 'replace')):
-                out.append(('WIDEO GPS', f'atom {key.decode("latin1")} zawiera wspolrzedne'))
+                out.append(('WIDEO GPS', tr('atom {key} zawiera wspolrzedne',
+                                            key=key.decode('latin1'))))
     if b'creation_time' in data:
-        out.append(('WIDEO czas', 'atom creation_time - kiedy i gdzie nagrywano'))
+        out.append(('WIDEO czas', tr('atom creation_time - kiedy i gdzie nagrywano')))
     if data.find(b'com.apple.quicktime') != -1 and data.find(b'udta') != -1:
-        out.append(('WIDEO udta', 'kontener metadanych uzytkownika w pliku wideo'))
+        out.append(('WIDEO udta', tr('kontener metadanych uzytkownika w pliku wideo')))
     return out
 
 
@@ -633,18 +646,21 @@ def scan_zip(path):
             leaks = [n for n in names if n.split('/')[0].startswith('__MACOSX')
                      or n.endswith(('.DS_Store', 'Thumbs.db')) or '/._' in n]
             if leaks:
-                rep.findings.append(Finding('comment', f'{len(leaks)} plikow smieci w archiwum '
-                                                      f'({", ".join(leaks[:3])}...)',
+                rep.findings.append(Finding('comment',
+                                           tr('{n} plikow smieci w archiwum ({names}...)',
+                                              n=len(leaks),
+                                              names=', '.join(leaks[:3])),
                                            'LOW', 'nazwy plikow wewnatrz archiwum: '
                                                   'uzytkownicy, pelne sciezki, daty'))
             hidden = [n for n in names if '._' in n or n.startswith('.')]
             if hidden:
                 rep.findings.append(Finding('comment',
-                                           f'{len(hidden)} ukrytych plikow (._ / kropka)',
+                                           tr('{n} ukrytych plikow (._ / kropka)',
+                                              n=len(hidden)),
                                            'LOW', 'pliki ._tar sa ukrytym duplikatem '
                                                   'uzytkownika i sciezka w nazwie'))
     except Exception as e:
-        rep.note = f'zip: {e}'
+        rep.note = tr('zip: {err}', err=e)
         rep.cleanable = False
     return rep
 
@@ -753,9 +769,9 @@ def _scan_file_uncached(path, ruleset=None):
     rv = rs.CURRENT if ruleset is None else ruleset
     ext = os.path.splitext(path)[1].lower()
     if not os.path.exists(path):
-        return Report(path=path, note='plik nie istnieje', cleanable=False)
+        return Report(path=path, note=tr('plik nie istnieje'), cleanable=False)
     if os.path.getsize(path) == 0:
-        return Report(path=path, note='plik pusty (0 bajtow)', cleanable=False)
+        return Report(path=path, note=tr('plik pusty (0 bajtow)'), cleanable=False)
     kind_s, ext_s = sniff(path)
     # Format rozpoznajemy po ZAWARTOSCI, nie po rozszerzeniu. Plik bez
     # rozszerzenia, PNG nazwany .jpg albo JPEG zmyłka jako .gif - wszystkie
@@ -769,7 +785,7 @@ def _scan_file_uncached(path, ruleset=None):
     if ext in VIDEO_EXT:
         rep = Report(path=path, kind='video', size=os.path.getsize(path))
         if rs.supports(rv, 'video_gps'):
-            f = [Finding('gps' if 'GPS' in a else 'datetime', f'{a}: {b}',
+            f = [Finding('gps' if 'GPS' in a else 'datetime', f'{tr(a)}: {tr(b)}',
                          'HIGH' if 'GPS' in a else 'LOW',
                          'wideo nie ma tagow EXIF - lokalizacja siedzi w atomie pliku')
                  for a, b in video_gps(path)]
@@ -779,7 +795,7 @@ def _scan_file_uncached(path, ruleset=None):
         rep = scan_image(path)
         if rs.supports(rv, 'trailing_data') and rep.complete:
             rep.findings.extend(
-                Finding('comment', f'{a}: {b}', 'HIGH',
+                Finding('comment', f'{tr(a)}: {tr(b)}', 'HIGH',
                         'bajty za znacznikiem konca obrazu - niewidoczne w podgladzie, '
                         'czytelne dla kazdego kto otworzy plik surowo')
                 for a, b in trailing_data(path))
@@ -787,7 +803,7 @@ def _scan_file_uncached(path, ruleset=None):
     if ext == '.zip':
         return scan_zip(path)
     rep = Report(path=path, size=os.path.getsize(path))
-    rep.note = 'nieobslugiwany typ pliku'
+    rep.note = tr('nieobslugiwany typ pliku')
     rep.cleanable = False
     return rep
 
@@ -1106,6 +1122,7 @@ def _cli(argv):
     ap.add_argument('path')
     ap.add_argument('--json', action='store_true')
     ap.add_argument('--scrub', metavar='OUT')
+    i18n.init()
     a = ap.parse_args(argv)
     reps = scan_tree(a.path) if os.path.isdir(a.path) else [scan_file(a.path)]
     if a.json:
@@ -1125,8 +1142,8 @@ def _cli(argv):
             except Exception as e:
                 skipped.append((r.path, f'{type(e).__name__}: {e}'))
         for pth, why in skipped:
-            print(f'POMINIETO {pth}: {why}', file=sys.stderr)
-        print(f'wyczyszczono {n} plikow -> {a.scrub}')
+            print(tr('POMINIETO {path}: {why}', path=pth, why=why), file=sys.stderr)
+        print(tr('wyczyszczono {n} plikow -> {out}', n=n, out=a.scrub))
         return 0
     total = 0
     for r in sorted(reps, key=lambda x: -x.risk_score):
@@ -1138,7 +1155,8 @@ def _cli(argv):
             print(f'        {f.risk:4} {f.kind:10} {f.value[:70]}')
             if f.why:
                 print(f'                       -> {f.why}')
-    print(f'\n{total} plikow z danymi do usuniecia z {len(reps)}')
+    print('\n' + tr('{total} plikow z danymi do usuniecia z {n}',
+                      total=total, n=len(reps)))
     return 0
 
 
